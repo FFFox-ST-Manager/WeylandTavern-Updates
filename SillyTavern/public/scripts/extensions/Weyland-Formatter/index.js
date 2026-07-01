@@ -47,7 +47,7 @@ let settings = undefined;
  * @property {RegExp} thinkStart
  * @property {RegExp} thinkEnd
  * 
- * @property {RegExp} extraTags
+ * @property {RegExp} analysisFull
  * 
  * @property {RegExp} asterisk
  * 
@@ -146,7 +146,7 @@ const weylandRegex = {
     thinkStart: /^<.*think.*>/,
     thinkEnd: /<.*\/.*think.*>$/,
 
-    extraTags: /<analysis>[\w\W]+?(?:<\/analysis>|\n(?=¦+\s?.+? ?(?:\(\w{4}\) ?)?¦+$))/i,
+    analysisFull: /<analysis>[\w\W]+?(?:<\/analysis>|\n(?=¦+\s?.+? ?(?:\(\w{4}\) ?)?¦+$))/i,
 
     asterisk: /\*/g,
 
@@ -291,7 +291,7 @@ async function formatParagraphs(message) {
     message = replaceText(message, weylandRegex.roughDraftRemove, "");
 
     // Remove additional tagged blocks
-    message = replaceText(message, weylandRegex.extraTags, "");
+    message = replaceText(message, weylandRegex.analysisFull, "");
 
     let paragraphs = message.split(weylandRegex.paragraphSplit);
     let paragraphCount = paragraphs.length;
@@ -596,6 +596,15 @@ async function formatMessage(messageId, mes = undefined) {
             originalMessage = split[1].trim();
         }
     }
+
+    const analysisFull = originalMessage.match(weylandRegex.analysisFull);
+    if (analysisFull) {
+        if (settings?.experimental) {
+            reason = `${reason}${thinkFull ? "\n\n---\n\n" : ""}${analysisFull[0].replace("<analysis>", "").replace("</analysis>","").trim()}`
+        }
+        originalMessage = originalMessage.replace(analysisFull[0], "").trim();
+    }
+
     chat[messageId].extra.reasoning = reason;
 
     if (weylandRegex.detectHeader.test(originalMessage) || weylandRegex.badHeader.test(originalMessage) || (characterName === `Muse` && weylandRegex.detectMuseHeader.test(originalMessage))) {
