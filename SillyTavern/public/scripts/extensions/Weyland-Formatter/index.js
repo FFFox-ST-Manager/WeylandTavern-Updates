@@ -47,6 +47,8 @@ let settings = undefined;
  * @property {RegExp} thinkStart
  * @property {RegExp} thinkEnd
  * 
+ * @property {RegExp} extraTags
+ * 
  * @property {RegExp} asterisk
  * 
  * @property {RegExp} headerFix
@@ -143,6 +145,8 @@ const weylandRegex = {
     thinkFull: /<.*think.*>[\w\W]+?<.*\/.*think.*>/,
     thinkStart: /^<.*think.*>/,
     thinkEnd: /<.*\/.*think.*>$/,
+
+    extraTags: /<analysis>[\w\W]+?(?:<\/analysis>|\n(?=¦+\s?.+? ?(?:\(\w{4}\) ?)?¦+$))/i,
 
     asterisk: /\*/g,
 
@@ -285,6 +289,9 @@ async function formatParagraphs(message) {
 
     // Remove the rough draft marker "[D]"
     message = replaceText(message, weylandRegex.roughDraftRemove, "");
+
+    // Remove additional tagged blocks
+    message = replaceText(message, weylandRegex.extraTags, "");
 
     let paragraphs = message.split(weylandRegex.paragraphSplit);
     let paragraphCount = paragraphs.length;
