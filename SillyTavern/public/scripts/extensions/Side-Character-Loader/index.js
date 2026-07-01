@@ -1,11 +1,91 @@
 import { SlashCommandParser } from "../../slash-commands/SlashCommandParser.js";
 import { SlashCommand } from "../../slash-commands/SlashCommand.js";
 import { ARGUMENT_TYPE, SlashCommandArgument, SlashCommandNamedArgument } from "../../slash-commands/SlashCommandArgument.js";
+import { extension_settings } from "../../extensions.js";
 
 const STYLE_ID = 'side-character-loader-style';
 const CONSOLE_PREFIX = '[SCL]';
 
+//#region Expression
+/**
+ * Takes a given sprite as returned from the server, and enriches it with additional data for display/sorting
+ * @param {{ path: string, label: string }} sprite
+ * @returns {import("../expressions/index.js").ExpressionImage & {filePath: string}}
+ */
+function getExpressionImageData(sprite) {
+    const filePath = sprite.path.split('?')[0].slice(1);
+    const fileName = filePath.split('/')[0];
+    const fileNameWithoutExtension = fileName.replace(/\.[^/.]+$/, '');
+    return {
+        expression: sprite.label,
+        filePath: filePath,
+        fileName: fileName,
+        title: fileNameWithoutExtension,
+        imageSrc: sprite.path,
+        type: 'success',
+        isCustom: extension_settings.expressions.custom?.includes(sprite.label),
+    };
+}
+
+/**
+ * Fetches and processes the list of sprites for a given character name.
+ * Retrieves sprite data from the server and organizes it into labeled groups.
+ *
+ * @param {string} name - The character name to fetch sprites for
+ * @returns {Promise<import("../expressions/index.js").Expression[]>} A promise that resolves to an array of grouped expression objects, each containing a label and associated image data
+ */
+async function getSpritesList(name) {
+    console.debug('getting sprites list');
+
+    try {
+        const result = await fetch(`/api/sprites/get?name=${encodeURIComponent(name)}`);
+        /** @type {{ label: string, path: string }[]} */
+        let sprites = result.ok ? (await result.json()) : [];
+
+        console.log(`[WQR] rawSprites:`, sprites);
+
+        /** @type {import("../expressions/index.js").Expression[]} */
+        const grouped = sprites.reduce((acc, sprite) => {
+            const imageData = getExpressionImageData(sprite);
+            let existingExpression = acc.find(exp => exp.label === sprite.label);
+            if (existingExpression) {
+                existingExpression.files.push(imageData);
+            } else {
+                acc.push({ label: sprite.label, files: [imageData] });
+            }
+
+            return acc;
+        }, []);
+
+        // Sort the sprites for each expression alphabetically, but keep the main expression file at the front
+        for (const expression of grouped) {
+            expression.files.sort((a, b) => {
+                if (a.title === expression.label) return -1;
+                if (b.title === expression.label) return 1;
+                return a.title.localeCompare(b.title);
+            });
+
+            // Mark all besides the first sprite as 'additional'
+            for (let i = 1; i < expression.files.length; i++) {
+                expression.files[i].type = 'additional';
+            }
+        }
+
+        return grouped;
+    }
+    catch (err) {
+        console.log(err);
+        return [];
+    }
+}
+//#endregion
+
 const findImage = async (character, expression) => {
+    const spriteList = await getSpritesList(character);
+    const images = spriteList.find(sprite => sprite.label === expression)?.files;
+    const path = images && images?.length > 1 ? images?.[Math.floor(Math.random() * images.length)].filePath  : images?.[0].filePath;
+    if (path) return path;
+
     const extensions = ['avif', 'png', 'webp'];
     const basePath = `characters/${character}`;
     
@@ -55,7 +135,7 @@ const getSideCharacterWidth = () => {
     return null; // Fall back to default
 };
 
-const updateSideCharacter = async (args) => {
+export const updateSideCharacter = async (/** @type {{ clear?: string; character?: string; expression?: string; bottom?: string; right?: string; width?: string; height?: string; }} */ args) => {
     // Parse clear parameter
     const shouldClear = args.clear === 'true';
     
@@ -107,12 +187,12 @@ const updateSideCharacter = async (args) => {
     
     // Parse parameters with defaults
     const character = args.character || 'Blake';
-    const expression = args.expression || 'neutral';
+    const expression = args.expression?.toLowerCase() || 'neutral';
     const bottom = args.bottom || '0px';
     const right = args.right || '0px';
     const width = args.width || defaultWidth;
     const height = args.height || defaultHeight;
-    
+
     // Find the image
     const imagePath = await findImage(character, expression);
     

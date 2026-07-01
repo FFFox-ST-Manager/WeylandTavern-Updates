@@ -1,0 +1,11 @@
+{
+    "display_name": "Quick Replies Ext",
+    "loading_order": 13,
+    "requires": [],
+    "optional": [],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "",
+    "version": "1.0.0",
+    "homePage": "https://github.com/SillyTavern/SillyTavern"
+}
