@@ -19,7 +19,7 @@ import { scenarios, tails } from "./src/scenarios.js";
 import { setPersonaLockState } from "../../personas.js";
 import { charPer } from "./src/charper.js";
 
-const debug = true;
+const debug = flase;
 
 /**
  * Debug Logs
@@ -27,12 +27,11 @@ const debug = true;
  * @param {any} object
  */
 function DebugLog(message, object=undefined) {
-    if (debug)  {
-        if (object !== undefined) {
-            console.log(`[WQR] ${message}`, object);
-        } else {
-            console.log(`[WQR] ${message}`);
-        }
+    if (!debug) return;
+    if (object !== undefined) {
+        console.log(`[WQR] ${message}`, object);
+    } else {
+        console.log(`[WQR] ${message}`);
     }
 }
 
