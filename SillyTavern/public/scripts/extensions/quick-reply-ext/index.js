@@ -7,7 +7,6 @@ import { selected_world_info, onWorldInfoChange } from "../../world-info.js";
 import { oai_settings } from "../../openai.js";
 import { delay } from "../../utils.js";
 import { isMobile } from "../../RossAscends-mods.js";
-import { setPersonaLockState } from "../../personas.js";
 import { updateSideCharacter } from "../Side-Character-Loader/index.js";
 
 import { getRandomInt, getCurrentCharacterName, getCurrentUserName, setLLModel, setBackground, tagExists, tagAdd, tagRemove, getPersonaBook, getCurrentCharacterWorldbook, getSpriteFolderName, setCostume, setExpression } from "./src/general.js";
@@ -17,9 +16,10 @@ import { doButtons, doInput, doPopup } from "./src/popups.js";
 import { getFirstMessage, getLastMessage, getMessages, hideMessages, unhideMessages } from "./src/chat.js";
 import strings from "./src/strings.js";
 import { scenarios, tails } from "./src/scenarios.js";
+import { setPersonaLockState } from "../../personas.js";
 import { charPer } from "./src/charper.js";
 
-const debug = false;
+const debug = true;
 
 /**
  * Debug Logs
@@ -27,16 +27,18 @@ const debug = false;
  * @param {any} object
  */
 function DebugLog(message, object=undefined) {
-    if (!debug) return;
-    if (object !== undefined) {
-        console.log(`[WQR] ${message}`, object);
-    } else {
-        console.log(`[WQR] ${message}`);
+    if (debug)  {
+        if (object !== undefined) {
+            console.log(`[WQR] ${message}`, object);
+        } else {
+            console.log(`[WQR] ${message}`);
+        }
     }
 }
 
 // Non-Persistent checks, use sparingly
 const checks = {
+    skipChatChange: false,
     skipLTMCounter: false,
     lastChatID: ""
 };
@@ -73,10 +75,11 @@ async function OnBeforeGeneration(args) {
 async function OnUser(messageID) {
     try {
         DebugLog(`OnUser called.`);
-        /** @type {import("./src/chat.js").ChatMessage | undefined} */ const chatMessage = chat[messageID];
         // DebugLog(`OnUser chat:`, chat);
         // DebugLog(`OnUser chat message:`, chatMessage);
         // DebugLog(`OnUser messageID`, messageID);
+
+        /** @type {import("./src/chat.js").ChatMessage | undefined} */ const chatMessage = chat[messageID];
 
         const userText = chatMessage?.mes;
         const userName = chatMessage?.name;
@@ -169,6 +172,7 @@ async function OnUser(messageID) {
     } catch (error) {
         console.error(`[WQR] OnUser Error:`, error);
     }
+    
 }
 
 /**
@@ -177,10 +181,11 @@ async function OnUser(messageID) {
 async function OnAi(messageID) {
     try {
         DebugLog(`OnAi called.`);
-        /** @type {import("./src/chat.js").ChatMessage | undefined} */ const chatMessage = chat[messageID];
         // DebugLog(`OnAi chat:`, chat);
         // DebugLog(`OnAi chat message:`, chatMessage);
         // DebugLog(`OnAi messageID`, messageID);
+
+        /** @type {import("./src/chat.js").ChatMessage | undefined} */ const chatMessage = chat[messageID];
 
         const charText = chatMessage?.mes;
         const charName = chatMessage?.name;
@@ -194,6 +199,13 @@ async function OnAi(messageID) {
 
         if (newMessage) {
             DebugLog(`CharMessageID: ${currentMessID} !== ${getLocalVariable("lastMessID")}`);
+            
+            // Set Analysis for Prompt Type based on RUBY
+            if (charText.includes("RUBY")) {
+                setLocalVariable("AnalysisLayer", strings.RubyAnalysis);
+            } else {
+                setLocalVariable("AnalysisLayer", strings.NorAnalysis);
+            }
 
             // MemorySaver Script
             const MemorySaverStart = performance.now();
@@ -300,7 +312,6 @@ async function OnSwipe(messageID) {
     try {
         DebugLog(`OnSwipe called.`);
         const charMessage = chat[messageID];
-        //DebugLog(`OnSwipe: charMessage`, charMessage);
 
         const charName = charMessage?.name;
         const newSwipe = charMessage?.swipe_id >= charMessage?.swipes?.length
@@ -323,7 +334,10 @@ async function OnChatChanged(chatbookName) {
     try {
         DebugLog(`OnChatChanged called.`);
         DebugLog(`Chatbook: `, chatbookName);
-        
+        if (checks.skipChatChange) {
+            checks.skipChatChange = false;
+            return;
+        }
         if (checks.lastChatID !== chatbookName) {
             await quickReplyApi.executeQuickReply("Weyland", "Descr");
             await quickReplyApi.executeQuickReply("Weyland", "PP&PPPLimiters");
@@ -343,6 +357,7 @@ async function OnNewChat(args) {
     // This is called only the first time a character is selected after being downloaded for some reason
     try {
         DebugLog(`OnNewChat called.`);
+
         
     } catch (error) {
         console.error(`[WQR] OnNewChat Error:`, error);
@@ -396,10 +411,14 @@ async function TitleBarColors() {
                 }
             }
             setLocalVariable("ClothingCodeP", clothingCodeP);
-            await quickReplyApi.executeQuickReply("Weyland", "XXX");
+            if (getLocalVariable("AnalysisLayer") === "") {
+                setLocalVariable("AnalysisLayer", strings.NorAnalysis);
+            }
             if (getLocalVariable("LocalN") === "") {
                 setLocalVariable("LocalNarrator", getGlobalVariable("Narrator"));
+                
             }
+            await quickReplyApi.executeQuickReply("Weyland", "XXX");
         }
         const expSave = getLocalVariable("ExpSave");
         if (!expSave) {
@@ -1139,7 +1158,6 @@ async function LTMCounter(messageID, userName) {
         const characterName = getCurrentCharacterName();
         if (!characterName) return "{{char}} undefined";
         if (!userName) userName = getCurrentUserName();
-        const chatbookName = await getCurrentChatbook();
         setLocalVariable("LTMLorebook", "Weyland");
         if (getLocalVariable("LTMGoal") === "") {
             let LTMGoal = 999999;
@@ -1161,6 +1179,7 @@ async function LTMCounter(messageID, userName) {
                 const choice = await doButtons({labels: "[\"Create LTM\",\"Snooze LTM for 1 User Message\",\"Snooze LTM for x Messages\",\"Disable LTMs\"]"}, `LTM Preparing to be created.<br><br>Is now a good time for an LTM, or do you wish to snooze it?`) || "Create LTM";
                 setLocalVariable("SnoozeOptions", choice);
                 if (choice === "Create LTM") {
+                    const chatbookName = await getCurrentChatbook();
                     const LTMMessages = getGlobalVariable("LTMMessages");
                     setLocalVariable("LTMGoal", LTMGoal + LTMMessages);
                     setLocalVariable("ChatLore", chatbookName);
@@ -1458,6 +1477,8 @@ This is our sort of rough approach of forcing down the LLM Niceness barrier with
                 }
             }
         } 
+        
+        setLocalVariable("AnalysisLayer", strings.NorAnalysis);
 
         if (getLocalVariable("SpecialThoughts") === "true") {
             await quickReplyApi.executeQuickReply("Weyland", "XXX");
