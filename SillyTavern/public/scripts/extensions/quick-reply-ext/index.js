@@ -110,7 +110,6 @@ async function OnUser(messageID) {
                 const scenariosResult = await Scenarios(userText);
                 if (scenariosResult !== undefined) anyFail = true;
 
-
                 if (getLocalVariable("PastRP") === "") {
                     const rosterSBResult = await RosterSB(characterName);
                     if (rosterSBResult !== undefined) anyFail = true;
@@ -121,7 +120,7 @@ async function OnUser(messageID) {
                 const charPerResult = await CharPer(characterName);
                 if (charPerResult !== undefined) anyFail = true;
                 
-                if (!anyFail) setLocalVariable("ScenarioSet", "true");
+                setLocalVariable("ScenarioSet", "true");
             }
 
             // Make sure the Weyland lorebook is on
@@ -1930,7 +1929,6 @@ async function Relationships(){
         const lastCharMessage = getLastMessage("char")?.mes;
         if (!lastCharMessage) return;
         const RelationshipPrefix = "The following are characters that {{user}}";
-        const relationships = [];
         /**
          * RelationshipType, RelationshipSuffix
          * @type {Object.<string,string>}
@@ -1941,17 +1939,34 @@ async function Relationships(){
             "Hostile": "is on negative terms with",
             "Lover": "has as lovers"
         };
+
+        /**
+         * Character, RelationshipType
+         * @type {Object.<string,string>}
+         */
+        const relationships = JSON.parse(getLocalVariable("WeybotRelationships") || "{}");
         for (const relationshipType of Object.keys(relationshipTypes)) {
             const matches = [...lastCharMessage.matchAll(new RegExp(`(?<=New ${relationshipType}:) *{?([^{}\n\\d]+)`, "g"))
                 .map(m => m[1])
                 .filter(name => name !== "None")
             ];
             if (!matches?.length) continue;
-            const relationship = `${RelationshipPrefix} ${relationshipTypes[relationshipType]}: ${matches.join(", ")}.\n`
-            relationships.push(relationship);
+            for (const name of matches) {
+                relationships[name] = relationshipType;
+            }
         }
-        const constantScenario = `[{{user}} RELATIONSHIPS]\n${relationships.join("\n")}[END {{user}} RELATIONSHIPS]`
-        DebugLog(`Relationships:`, constantScenario);
+
+        const ConstantScenarioLines = [];
+        for (const relationshipType of Object.keys(relationshipTypes)) {
+            const characters = Object.keys(relationships)
+                .filter(name => relationships[name] === relationshipType);
+            if (characters?.length)
+                ConstantScenarioLines.push(`${RelationshipPrefix} ${relationshipTypes[relationshipType]}: ${characters.join(", ")}.`);
+        }
+
+        setLocalVariable("WeybotRelationships", JSON.stringify(relationships) || "{}");
+
+        const constantScenario = `[{{user}} RELATIONSHIPS]\n${ConstantScenarioLines.join('\n') ?? "No relationships yet."}\n[END {{user}} RELATIONSHIPS]`
         setLocalVariable("ConstantScenario", constantScenario);
         DebugLog(`[P] Relationships: ${(performance.now()-PerformanceStart).toFixed(4)}ms`);
     } catch (error) {
