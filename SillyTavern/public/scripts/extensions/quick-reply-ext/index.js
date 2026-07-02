@@ -200,7 +200,7 @@ async function OnAi(messageID) {
             DebugLog(`CharMessageID: ${currentMessID} !== ${getLocalVariable("lastMessID")}`);
             
             // Set Analysis for Prompt Type based on RUBY
-            if (charText.includes("RUBY")) {
+            if (charText.includes("[RUBY]")) {
                 setLocalVariable("AnalysisLayer", strings.RubyAnalysis);
             } else {
                 setLocalVariable("AnalysisLayer", strings.NorAnalysis);
