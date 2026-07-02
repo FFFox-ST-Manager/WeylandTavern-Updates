@@ -19,7 +19,7 @@ import { scenarios, tails } from "./src/scenarios.js";
 import { setPersonaLockState } from "../../personas.js";
 import { charPer } from "./src/charper.js";
 
-const debug = flase;
+const debug = false;
 
 /**
  * Debug Logs
