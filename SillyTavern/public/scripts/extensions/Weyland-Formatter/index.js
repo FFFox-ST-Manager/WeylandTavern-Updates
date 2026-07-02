@@ -47,6 +47,8 @@ let settings = undefined;
  * @property {RegExp} thinkStart
  * @property {RegExp} thinkEnd
  * 
+ * @property {RegExp} analysisFull
+ * 
  * @property {RegExp} asterisk
  * 
  * @property {RegExp} headerFix
@@ -143,6 +145,8 @@ const weylandRegex = {
     thinkFull: /<.*think.*>[\w\W]+?<.*\/.*think.*>/,
     thinkStart: /^<.*think.*>/,
     thinkEnd: /<.*\/.*think.*>$/,
+
+    analysisFull: /<analysis>[\w\W]+?(?:<\/analysis>|\n(?=¦+\s?.+? ?(?:\(\w{4}\) ?)?¦+$))/i,
 
     asterisk: /\*/g,
 
@@ -285,6 +289,9 @@ async function formatParagraphs(message) {
 
     // Remove the rough draft marker "[D]"
     message = replaceText(message, weylandRegex.roughDraftRemove, "");
+
+    // Remove additional tagged blocks
+    message = replaceText(message, weylandRegex.analysisFull, "");
 
     let paragraphs = message.split(weylandRegex.paragraphSplit);
     let paragraphCount = paragraphs.length;
@@ -589,6 +596,15 @@ async function formatMessage(messageId, mes = undefined) {
             originalMessage = split[1].trim();
         }
     }
+
+    const analysisFull = originalMessage.match(weylandRegex.analysisFull);
+    if (analysisFull) {
+        if (settings?.experimental) {
+            reason = `${reason}${thinkFull ? "\n\n---\n\n" : ""}${analysisFull[0].replace("<analysis>", "").replace("</analysis>","").trim()}`
+        }
+        originalMessage = originalMessage.replace(analysisFull[0], "").trim();
+    }
+
     chat[messageId].extra.reasoning = reason;
 
     if (weylandRegex.detectHeader.test(originalMessage) || weylandRegex.badHeader.test(originalMessage) || (characterName === `Muse` && weylandRegex.detectMuseHeader.test(originalMessage))) {
