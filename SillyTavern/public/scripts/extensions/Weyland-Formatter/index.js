@@ -125,6 +125,7 @@ let settings = undefined;
  * @property {RegExp} verticalBar
  * 
  * @property {RegExp} expressionClothingParagraph
+ * @property {RegExp} weybotRelationships
  * @property {RegExp} ltmFix
  * @property {RegExp} roughDraftRemove
  */
@@ -224,6 +225,7 @@ const weylandRegex = {
     verticalBar: /[\|│¦]/,
 
     expressionClothingParagraph: /^((?:\[[a-z]+?\]) ?(?:\[[a-z]+?\])(?: ?\[[a-z]+?\])?)(?: +)?(\[\d+\])?.*$/i,
+    weybotRelationships: /^New (?:Aquaintance|Friend|Hostile|Lover): ?{?.+?}?$/im,
     ltmFix: /(.*\n\n#.*[\s\S]*?\n\nMEMORY:[\s\S]*?\n\nFRAGMENTS:[\s\S]*?(?=\n\n))/im,
     roughDraftRemove: /((?<=\n)\n+)? *\[D\] *(\n+(?=\n))?/i,
 };
@@ -351,7 +353,7 @@ async function formatParagraphs(message) {
             }
             
             if (foundFooter) {
-                paragraphs[index] = "";
+                if (!weylandRegex.weybotRelationships.test(paragraph)) paragraphs[index] = "";
                 return;
             } else {
                 try {
