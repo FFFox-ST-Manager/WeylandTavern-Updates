@@ -15,6 +15,7 @@ public/NovelAI Settings/
 public/TextGen Settings/
 public/instruct/
 public/context/
+public/scripts/extensions/quick-reply-ext/encoder
 public/scripts/extensions/third-party/*
 !public/scripts/extensions/third-party/Weyland-SillyTavern
 !public/scripts/extensions/third-party/Weyland-SillyTavern/**

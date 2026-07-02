@@ -62,7 +62,7 @@ async function OnBeforeGeneration(args) {
         await quickReplyApi.executeQuickReply("Weyland","~");
         await quickReplyApi.executeQuickReply("Weyland","ExtCheck");
         if (args.dryRun) return; // Avoid running scripts on dry runs
-        DebugLog(`chat:`, args.chat);
+        // DebugLog(`chat:`, args.chat);
     } catch (error) {
         console.error(`[WQR] OnBeforeGeneration Error:`, error);
     }
@@ -137,9 +137,7 @@ async function OnUser(messageID) {
 
             // Weybot
             if (characterName === "Weybot") {
-                const RelationshipsStart = performance.now();
-                await quickReplyApi.executeQuickReply("Weyland","Relationships");
-                DebugLog(`[P] Relationships: ${(performance.now() - RelationshipsStart).toFixed(4)}ms`);
+                await Relationships();
             }
 
             // LTMRav?
@@ -369,6 +367,7 @@ async function OnNewChat(args) {
 
 /**
  * TitleBarColors Script
+ * OnChatChanged
  * @returns {Promise<string | undefined>}
  */
 async function TitleBarColors() {
@@ -467,6 +466,8 @@ async function TitleBarColors() {
 }
 
 /**
+ * Expressions Script
+ * OnChatChanged & OnSwipe
  * @param {string} [charName]
  * @param {import("./src/chat.js").ChatMessage} [charMessage]
  */
@@ -524,6 +525,8 @@ async function Expressions(charName, charMessage) {
 }
 
 /**
+ * SideCharacters Script
+ * OnChatChanged & OnSwipe
  * @param {string} [charName]
  * @param {import("./src/chat.js").ChatMessage} [charMessage]
  */
@@ -589,10 +592,13 @@ async function SideCharacters(charName, charMessage) {
 }
 
 /**
+ * Helper Function
+ * SideCharacters
  * @param {string} [charName]
+ * @param {boolean} [subbots]
  * @returns {Promise<{listOfCharacters: string[], aliasLookup: Map<string,string>}>}
  */
-async function GetCharacterNamesAndAliases(charName) {
+async function GetCharacterNamesAndAliases(charName, subbots=false) {
     if (!charName) charName = getCurrentCharacterName();
     const listOfCharacters = [
         "Aiko", "Ava", "Bap", "Belle", "Bianca", "Blake", "Cairo", "Ellie", "Fasti", "Gem", "Hannah", "Indigo", "Jenn", "Kai",
@@ -601,20 +607,20 @@ async function GetCharacterNamesAndAliases(charName) {
         "Gemini", "Jericho", "Loona", "Willow", "Rosa", "Eve", "Rosanna", "Briar", "Muse", "Sunny",
         "Khepri", "Shani", "Nefara", "Dash", "Miu", "Chaska", "Sofya", "Nathan", "Yue-Lin", "Professor Akiyama",
         ...(charName !== "Cerberus Sisters" ? ["Astrid", "Neshe", "Fawne"] : []),
+        ...(subbots ? [
+            "Adrian", "Ahset", "Thorne", "Ben", "Deredra", "Derek", "Dmitri", "Emily", "Garret", "Gaven", "Jericho", "Kellen",
+            "Kyana", "Leo", "Lexa", "Margaret", "Mark", "Mason", "Miu", "Nathan", "Navine", "Orville", "Remy", "Richard", "Rivet",
+            "Skye", "Sobek", "Tessa", "Tom", "Travis", "Mr. Wolfy", "Zora"
+        ] : [])
     ].filter(name => !charName?.includes(name));
 
     const characterAliases = {
-        "Professor Akiyama": [
-            "Professor Akiyama",
-            "Akiyama",
-            "Sayori"
-        ],
-        "Ṇ̶̰̼͘a̶͍̅́̒r̵̓̏̉̈́ā̸͒̔̄": [
-            "Nara"
-        ],
-        "Yue-Lin": [
-            "YueLin"
-        ]
+        "Professor Akiyama": ["Professor Akiyama", "Akiyama", "Sayori"],
+        "Ṇ̶̰̼͘a̶͍̅́̒r̵̓̏̉̈́ā̸͒̔̄": ["Nara"],
+        "Yue-Lin": ["YueLin"],
+        ...(subbots && {
+            "Mr. Wolfy": ["Wolfy"]
+        })
     };
 
     const aliasLookup = new Map();
@@ -630,6 +636,7 @@ async function GetCharacterNamesAndAliases(charName) {
 
 /**
  * AutoBG Script
+ * OnChatChanged, OnSwipe & OnAI
  * @param {import("./src/chat.js").ChatMessage} [charMessage]
  * @returns {Promise<string | undefined>}
  */
@@ -656,6 +663,7 @@ async function AutoBG(charMessage) {
 
 /**
  * BG Script
+ * AutoBG
  * @param {string} [charMessage]
  * @param {string} [charName]
  * @returns {Promise<string | undefined>}
@@ -1146,6 +1154,7 @@ async function BG(charMessage, charName) {
 
 /**
  * LTM Counter Script
+ * OnUser
  * @param {number} messageID
  * @param {string} userName
  * @returns {Promise<string | undefined>}
@@ -1298,6 +1307,7 @@ async function LTMCounter(messageID, userName) {
 
 /**
  * Scenarios Script
+ * OnChatChanged & OnUser
  * @param {string} [userMessage]
  * @returns {Promise<string | undefined>}
  */
@@ -1490,6 +1500,8 @@ This is our sort of rough approach of forcing down the LLM Niceness barrier with
 }
 
 /**
+ * RosterSB Script
+ * OnUser
  * @param {string} [charName] 
  * @returns {Promise<string | undefined>}
  * */
@@ -1726,6 +1738,8 @@ Dated Nix at start of Freshman, but ended getting dumped.`, true);
 }
 
 /**
+ * CharPer Script
+ * OnUser
  * @param {string} [charName] 
  * @returns {Promise<string | undefined>}
  * */
@@ -1802,10 +1816,11 @@ async function CharPer(charName) {
         console.error(`[WQR] CharPer Error:`, error);
         return "Error"
     }
-   
 }
 
 /**
+ * SetSchoolYear
+ * OnUser
  * @returns {Promise<string | undefined>}
  */
 async function SetSchoolYear() {
@@ -1902,6 +1917,45 @@ async function SetSchoolYear() {
     } catch (error) {
         console.error(`[WQR] SetSchoolYear Error:`, error);
         return "Error"
+    }
+}
+
+/**
+ * Relationships Script
+ * OnUser
+ */
+async function Relationships(){
+    const PerformanceStart = performance.now();
+    try {
+        const lastCharMessage = getLastMessage("char")?.mes;
+        if (!lastCharMessage) return;
+        const RelationshipPrefix = "The following are characters that {{user}}";
+        const relationships = [];
+        /**
+         * RelationshipType, RelationshipSuffix
+         * @type {Object.<string,string>}
+         */
+        const relationshipTypes = {
+            "Acquaintance": "is acquainted with",
+            "Friend": "is friends with",
+            "Hostile": "is on negative terms with",
+            "Lover": "has as lovers"
+        };
+        for (const relationshipType of Object.keys(relationshipTypes)) {
+            const matches = [...lastCharMessage.matchAll(new RegExp(`(?<=New ${relationshipType}:) *{?([^{}\n\\d]+)`, "g"))
+                .map(m => m[1])
+                .filter(name => name !== "None")
+            ];
+            if (!matches?.length) continue;
+            const relationship = `${RelationshipPrefix} ${relationshipTypes[relationshipType]}: ${matches.join(", ")}.\n`
+            relationships.push(relationship);
+        }
+        const constantScenario = `[{{user}} RELATIONSHIPS]\n${relationships.join("\n")}[END {{user}} RELATIONSHIPS]`
+        DebugLog(`Relationships:`, constantScenario);
+        setLocalVariable("ConstantScenario", constantScenario);
+        DebugLog(`[P] Relationships: ${(performance.now()-PerformanceStart).toFixed(4)}ms`);
+    } catch (error) {
+        console.log(`[WQR] Relationships Error:`, error);
     }
 }
 

@@ -42,8 +42,6 @@ async function getSpritesList(name) {
         /** @type {{ label: string, path: string }[]} */
         let sprites = result.ok ? (await result.json()) : [];
 
-        console.log(`[WQR] rawSprites:`, sprites);
-
         /** @type {import("../expressions/index.js").Expression[]} */
         const grouped = sprites.reduce((acc, sprite) => {
             const imageData = getExpressionImageData(sprite);
