@@ -67,7 +67,6 @@ let lastFinalizedGenId = null; // genId of the most recent attempt that was fina
 let currentAttemptSnapshot = null;
 let lastSelectedModel = null;
 let lastSelectedAt = 0;
-let manualStopRequestedAt = 0;
 const ROUTER_ATTEMPT_LOCK_KEY = '__weylandRouterAttemptLock';
 const ROUTER_INSTANCE_ID = `${WT_ROUTER_MODULE_NAME}:${extensionVersion}:${Math.random().toString(36).slice(2)}`;
 
@@ -749,28 +748,72 @@ async function triggerRetry() {
             return;
         }
 
-        // Remove the empty ghost message left by the failed generation before retrying
+        // A failed attempt on an EXISTING message (swipe/reroll) leaves the chat array
+        // the same length it was before we started - the failure is a blank swipe tacked
+        // onto that message's swipes[], not a whole new message. A failed attempt on a
+        // FRESH generation appends a brand new (empty) bot message to the chat.
+        // These need very different cleanup: popping a whole message during a swipe
+        // retry destroys every prior swipe on it; using /trigger for a swipe retry
+        // creates a second, duplicate message instead of continuing the swipe.
         const lastMsg = ctx.chat[ctx.chat.length - 1];
-        if (lastMsg && !lastMsg.is_user && (lastMsg.mes || '').trim() === '') {
-            routerLog('Removing empty ghost message before retry');
-            ctx.chat.pop();
-            // Also remove from DOM if present
-            const msgBlocks = document.querySelectorAll('.mes');
-            if (msgBlocks.length > 0) {
-                const lastBlock = msgBlocks[msgBlocks.length - 1];
-                if (lastBlock && !lastBlock.classList.contains('is_user')) {
-                    lastBlock.remove();
+        const wasSwipeAttempt = currentAttemptSnapshot != null && ctx.chat.length === currentAttemptSnapshot.chatLength
+            && lastMsg && !lastMsg.is_user && Array.isArray(lastMsg.swipes) && lastMsg.swipes.length > 0;
+
+        if (wasSwipeAttempt) {
+            // Trim the failed empty swipe off the end and restore the message to the
+            // last good swipe, then re-use ST's own swipe button to regenerate a new
+            // slot - this keeps every earlier swipe intact and stays consistent with
+            // whatever ST's swipe/Generate('swipe') internals expect.
+            const lastSwipeIdx = lastMsg.swipes.length - 1;
+            if (lastSwipeIdx >= 0 && isPlaceholderOutput(lastMsg.swipes[lastSwipeIdx])) {
+                routerLog('Removing empty swipe slot before retry');
+                lastMsg.swipes.pop();
+                if (Array.isArray(lastMsg.swipe_info)) lastMsg.swipe_info.pop();
+                const restoredIdx = Math.max(0, lastMsg.swipes.length - 1);
+                lastMsg.swipe_id = restoredIdx;
+                lastMsg.mes = lastMsg.swipes[restoredIdx] || '';
+                if (lastMsg.swipe_info?.[restoredIdx]?.extra) {
+                    lastMsg.extra = structuredClone(lastMsg.swipe_info[restoredIdx].extra);
                 }
             }
-        }
-        // Use /trigger to generate the next message fresh.
-        // Arm the one-shot retry token so the next interceptor invocation knows
-        // this is a continuation of the same user turn, no matter how long
-        // /trigger takes to actually fire it.
-        if (ctx.executeSlashCommandsWithOptions) {
+
             releaseRouterAttemptLock();
             pendingRetryAttempt = true;
-            await ctx.executeSlashCommandsWithOptions('/trigger', { showOutput: false });
+            const msgBlocks = document.querySelectorAll('.mes');
+            const lastBlock = msgBlocks[msgBlocks.length - 1];
+            const swipeRightBtn = lastBlock?.querySelector('.swipe_right');
+            if (swipeRightBtn) {
+                swipeRightBtn.click();
+            } else {
+                // No swipe button in the DOM (e.g. swipe arrows disabled in user settings).
+                // Nothing safe to do here without risking a duplicate/mismatched message -
+                // surface it and let the user manually swipe.
+                routerEvent('Could not find the swipe button to retry - please swipe manually', 'error');
+                clearAttemptCleanly();
+            }
+        } else {
+            // Fresh generation that produced an empty bot message - safe to remove
+            // the whole placeholder and let /trigger generate a clean new one.
+            if (lastMsg && !lastMsg.is_user && isPlaceholderOutput(lastMsg.mes)) {
+                routerLog('Removing empty ghost message before retry');
+                ctx.chat.pop();
+                const msgBlocks = document.querySelectorAll('.mes');
+                if (msgBlocks.length > 0) {
+                    const lastBlock = msgBlocks[msgBlocks.length - 1];
+                    if (lastBlock && !lastBlock.classList.contains('is_user')) {
+                        lastBlock.remove();
+                    }
+                }
+            }
+            // Use /trigger to generate the next message fresh.
+            // Arm the one-shot retry token so the next interceptor invocation knows
+            // this is a continuation of the same user turn, no matter how long
+            // /trigger takes to actually fire it.
+            if (ctx.executeSlashCommandsWithOptions) {
+                releaseRouterAttemptLock();
+                pendingRetryAttempt = true;
+                await ctx.executeSlashCommandsWithOptions('/trigger', { showOutput: false });
+            }
         }
     } catch (err) {
         console.error(`[${WT_ROUTER_MODULE_NAME}] Retry failed:`, err);
@@ -822,15 +865,6 @@ function onGenerationEnded(messageId) {
         return;
     }
 
-    // KEY FIX: if this message was already tagged by a previous successful generation,
-    // we are looking at stale content from before our retry. Don't count it as our success.
-    if (msg.extra?.weyland_router_model && (msg.extra.weyland_router_model !== currentlySelectedModel.id || (msg.extra.weyland_router_profile || '') !== (currentlySelectedModel.profileName || ''))) {
-        const failed = currentlySelectedModel;
-        routerLog(`Stale message detected (tagged by ${msg.extra.weyland_router_model} / ${msg.extra.weyland_router_profile || 'current'}, we are ${getModelLabel(currentlySelectedModel)}) - ignoring`);
-        failCurrentAttempt(failed, 'stale-output');
-        return;
-    }
-
     if (isPlaceholderOutput(content)) {
         const failed = currentlySelectedModel;
         if (String(msg.extra?.reasoning || '').trim()) {
@@ -868,16 +902,14 @@ function onGenerationStopped() {
     clearGenerationTimeout();
     if (isRetrying || !currentlySelectedModel) return;
 
-    const userStopLikely = Date.now() - manualStopRequestedAt < 1500;
-    if (userStopLikely) {
-        routerEvent(`Generation stopped by user - ${getModelLabel(currentlySelectedModel)} not penalized`, 'info');
-        clearAttemptCleanly();
-        return;
-    }
-
-    const failed = currentlySelectedModel;
-    routerLog(`Generation stopped without user stop intent for ${getModelLabel(failed)}`);
-    failCurrentAttempt(failed, 'stopped');
+    // GENERATION_STOPPED only fires when something actually stopped the generation
+    // (user clicked stop, pressed Esc, closed the tab mid-gen, etc). Router used to
+    // try to guess whether the user did it via a timing window on the stop button's
+    // pointerdown - too fragile (misses keyboard shortcuts, slow clicks, ST builds
+    // where the selector doesn't match) and would misfire into a retry cascade.
+    // Any stop is treated as intentional: no penalty, no retry.
+    routerEvent(`Generation stopped - ${getModelLabel(currentlySelectedModel)} not penalized`, 'info');
+    clearAttemptCleanly();
 }
 
 // =========================
@@ -1595,10 +1627,6 @@ jQuery(async () => {
     eventSource.on(event_types.GENERATION_ENDED, onGenerationEnded);
     eventSource.on(event_types.MESSAGE_RECEIVED, onMessageReceivedForRouter);
     if (event_types.GENERATION_STOPPED) eventSource.on(event_types.GENERATION_STOPPED, onGenerationStopped);
-
-    $(document).on('pointerdown', '#mes_stop, .mes_stop', () => {
-        manualStopRequestedAt = Date.now();
-    });
 
     installToastrSuppression();
     setupUnhandledRejectionListener();
