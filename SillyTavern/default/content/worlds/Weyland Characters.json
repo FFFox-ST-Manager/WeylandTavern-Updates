@@ -129,18 +129,7 @@
         },
         "2": {
             "uid": 2,
-            "key": [
-                "roommate",
-                "dorm",
-                "room",
-                "bed",
-                "cafe",
-                "bar",
-                "Serra",
-                "nap",
-                "sleep",
-                "sleeping"
-            ],
+            "key": [],
             "keysecondary": [],
             "comment": "Scenario",
             "content": "{{getvar::Scenario}}",
