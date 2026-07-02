@@ -40,7 +40,7 @@ const defaultSettings = {
     debug: false,
     routingMode: 'random',
     pool: [],
-    timeoutMs: 60000,
+    timeoutMs: 180000,
     cooldownMs: 5 * 60 * 1000,                // 5 min
     extendedCooldownMs: 3 * 60 * 60 * 1000,   // 3 hours
     failureWindowMs: 30 * 60 * 1000,          // 30 min rolling window
@@ -167,7 +167,10 @@ function getSettings() {
         }
     }
     settings = extensionSettings[WT_ROUTER_MODULE_NAME];
-    if (settings.timeoutMs === 30000) settings.timeoutMs = defaultSettings.timeoutMs;
+    // Migrate the old 30s/60s defaults up to 180s. Reasoning models regularly spend
+    // 45s+ thinking before writing; the old defaults killed healthy generations.
+    // Users who set an explicit non-default value keep their setting.
+    if (settings.timeoutMs === 30000 || settings.timeoutMs === 60000) settings.timeoutMs = defaultSettings.timeoutMs;
     // Migrate the old 10-minute default down to the new 5-minute default.
     // Users who set an explicit non-default value keep their setting.
     if (settings.cooldownMs === 10 * 60 * 1000) settings.cooldownMs = defaultSettings.cooldownMs;
@@ -831,8 +834,18 @@ function onGenerationStarted(type, options, dryRun) {
 
 function onGenerationEnded(messageId) {
     if (!settings?.enabled) return;
+    if (!currentlySelectedModel) { clearGenerationTimeout(); return; }
+
+    // Don't finalize while a generation is still in flight. The MESSAGE_RECEIVED
+    // safety net (and some providers' event ordering) can land here before the
+    // response text has actually been written to the chat - judging the attempt
+    // at that moment reads an unchanged message and falsely strikes the model as
+    // "no new output". Leave the timeout armed; the real end-event finalizes.
+    if (isGenerationLocked()) {
+        routerLog('Skipping premature finalize - generation still in progress');
+        return;
+    }
     clearGenerationTimeout();
-    if (!currentlySelectedModel) return;
 
     // Capture and clear the genId immediately so a second GENERATION_ENDED
     // event (e.g. from a retry, or the MESSAGE_RECEIVED safety net) can't re-enter
@@ -866,12 +879,15 @@ function onGenerationEnded(messageId) {
     }
 
     if (isPlaceholderOutput(content)) {
-        const failed = currentlySelectedModel;
-        if (String(msg.extra?.reasoning || '').trim()) {
-            routerEvent(`${failed.id} produced reasoning but no visible output`, 'warn');
+        // Some models put their entire reply inside the reasoning block and leave
+        // the visible body empty until downstream regex relocates it. Output is
+        // output - substantive reasoning counts as a successful generation.
+        const reasoningText = getReasoningText(msg).trim();
+        if (isPlaceholderOutput(reasoningText)) {
+            failCurrentAttempt(currentlySelectedModel, 'blank');
+            return;
         }
-        failCurrentAttempt(failed, 'blank');
-        return;
+        routerEvent(`${getModelLabel(currentlySelectedModel)} produced output inside the reasoning block - counting as success`, 'info');
     }
 
     // Success
@@ -1129,7 +1145,7 @@ function buildModalHtml() {
       <div style="color:#e0445c;font-size:16px;letter-spacing:2px;font-weight:900;">WEYLAND ROUTER</div>
       <div style="flex:1;"></div>
       <div id="wtr-status-pill" class="wtr-status-pill wtr-pill-off">DISABLED</div>
-      <button id="wtr-help-btn" class="wtr-btn-sm" title="What is Weyland Router?" style="padding:2px 8px;cursor:pointer;">?</button>
+      <button id="wtr-help-btn" class="wtr-btn-sm" title="What is Weyland Router?" style="padding:2px 8px;cursor:pointer;">What is this?</button>
       <button id="wtr-toggle-log" class="wtr-btn-sm" title="Show the routing activity log" style="padding:2px 10px;cursor:pointer;">Show Log</button>
       <button id="wtr-close-btn" class="wtr-btn-sm" title="Close Weyland Router" style="padding:2px 10px;cursor:pointer;">x</button>
     </div>
@@ -1228,6 +1244,10 @@ function buildModalHtml() {
             </ul>
             <div class="wtr-help-section">When things go sideways</div>
             <p>If a route errors, blanks, stalls, or times out, Router cools it down for the <b>Cooldown</b> duration and rolls the next eligible route. Open <b>Show Log</b> to watch it work in real time — copy the log if you need to show Lucky what happened.</p>
+            <div class="wtr-help-section" style="margin-top:12px;padding-top:10px;border-top:1px solid rgba(180,38,58,0.15);">Weyland Tavern</div>
+            <p>Made by <b>Kressa</b> and <b>Lucky</b> of the Weyland Tavern Project.</p>
+            <p>We are a diverse community based around Weyland University — a grounded AI roleplay environment dripping with lore, deeply detailed characters and tons of unique features!</p>
+            <p><a href="#" id="wtr-weyland-link" style="color:#e0445c;text-decoration:underline;cursor:pointer;">linktr.ee/weylanduniversity</a></p>
           </div>
         </div>
       </div>
@@ -1396,6 +1416,7 @@ function injectModal() {
     document.getElementById('wtr-close-btn').addEventListener('click', closeModal);
     document.getElementById('wtr-help-btn').addEventListener('click', showRouterHelp);
     document.getElementById('wtr-help-close').addEventListener('click', hideRouterHelp);
+    document.getElementById('wtr-weyland-link').addEventListener('click', e => { e.preventDefault(); window.open('https://linktr.ee/weylanduniversity', '_blank'); });
     document.getElementById('wtr-help-overlay').addEventListener('click', e => {
         // close when the user clicks the dim backdrop, not the card itself
         if (e.target === e.currentTarget) hideRouterHelp();
