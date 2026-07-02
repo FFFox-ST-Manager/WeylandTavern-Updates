@@ -40,7 +40,7 @@ const defaultSettings = {
     debug: false,
     routingMode: 'random',
     pool: [],
-    timeoutMs: 60000,
+    timeoutMs: 180000,
     cooldownMs: 5 * 60 * 1000,                // 5 min
     extendedCooldownMs: 3 * 60 * 60 * 1000,   // 3 hours
     failureWindowMs: 30 * 60 * 1000,          // 30 min rolling window
@@ -67,7 +67,6 @@ let lastFinalizedGenId = null; // genId of the most recent attempt that was fina
 let currentAttemptSnapshot = null;
 let lastSelectedModel = null;
 let lastSelectedAt = 0;
-let manualStopRequestedAt = 0;
 const ROUTER_ATTEMPT_LOCK_KEY = '__weylandRouterAttemptLock';
 const ROUTER_INSTANCE_ID = `${WT_ROUTER_MODULE_NAME}:${extensionVersion}:${Math.random().toString(36).slice(2)}`;
 
@@ -168,7 +167,10 @@ function getSettings() {
         }
     }
     settings = extensionSettings[WT_ROUTER_MODULE_NAME];
-    if (settings.timeoutMs === 30000) settings.timeoutMs = defaultSettings.timeoutMs;
+    // Migrate the old 30s/60s defaults up to 180s. Reasoning models regularly spend
+    // 45s+ thinking before writing; the old defaults killed healthy generations.
+    // Users who set an explicit non-default value keep their setting.
+    if (settings.timeoutMs === 30000 || settings.timeoutMs === 60000) settings.timeoutMs = defaultSettings.timeoutMs;
     // Migrate the old 10-minute default down to the new 5-minute default.
     // Users who set an explicit non-default value keep their setting.
     if (settings.cooldownMs === 10 * 60 * 1000) settings.cooldownMs = defaultSettings.cooldownMs;
@@ -749,28 +751,72 @@ async function triggerRetry() {
             return;
         }
 
-        // Remove the empty ghost message left by the failed generation before retrying
+        // A failed attempt on an EXISTING message (swipe/reroll) leaves the chat array
+        // the same length it was before we started - the failure is a blank swipe tacked
+        // onto that message's swipes[], not a whole new message. A failed attempt on a
+        // FRESH generation appends a brand new (empty) bot message to the chat.
+        // These need very different cleanup: popping a whole message during a swipe
+        // retry destroys every prior swipe on it; using /trigger for a swipe retry
+        // creates a second, duplicate message instead of continuing the swipe.
         const lastMsg = ctx.chat[ctx.chat.length - 1];
-        if (lastMsg && !lastMsg.is_user && (lastMsg.mes || '').trim() === '') {
-            routerLog('Removing empty ghost message before retry');
-            ctx.chat.pop();
-            // Also remove from DOM if present
-            const msgBlocks = document.querySelectorAll('.mes');
-            if (msgBlocks.length > 0) {
-                const lastBlock = msgBlocks[msgBlocks.length - 1];
-                if (lastBlock && !lastBlock.classList.contains('is_user')) {
-                    lastBlock.remove();
+        const wasSwipeAttempt = currentAttemptSnapshot != null && ctx.chat.length === currentAttemptSnapshot.chatLength
+            && lastMsg && !lastMsg.is_user && Array.isArray(lastMsg.swipes) && lastMsg.swipes.length > 0;
+
+        if (wasSwipeAttempt) {
+            // Trim the failed empty swipe off the end and restore the message to the
+            // last good swipe, then re-use ST's own swipe button to regenerate a new
+            // slot - this keeps every earlier swipe intact and stays consistent with
+            // whatever ST's swipe/Generate('swipe') internals expect.
+            const lastSwipeIdx = lastMsg.swipes.length - 1;
+            if (lastSwipeIdx >= 0 && isPlaceholderOutput(lastMsg.swipes[lastSwipeIdx])) {
+                routerLog('Removing empty swipe slot before retry');
+                lastMsg.swipes.pop();
+                if (Array.isArray(lastMsg.swipe_info)) lastMsg.swipe_info.pop();
+                const restoredIdx = Math.max(0, lastMsg.swipes.length - 1);
+                lastMsg.swipe_id = restoredIdx;
+                lastMsg.mes = lastMsg.swipes[restoredIdx] || '';
+                if (lastMsg.swipe_info?.[restoredIdx]?.extra) {
+                    lastMsg.extra = structuredClone(lastMsg.swipe_info[restoredIdx].extra);
                 }
             }
-        }
-        // Use /trigger to generate the next message fresh.
-        // Arm the one-shot retry token so the next interceptor invocation knows
-        // this is a continuation of the same user turn, no matter how long
-        // /trigger takes to actually fire it.
-        if (ctx.executeSlashCommandsWithOptions) {
+
             releaseRouterAttemptLock();
             pendingRetryAttempt = true;
-            await ctx.executeSlashCommandsWithOptions('/trigger', { showOutput: false });
+            const msgBlocks = document.querySelectorAll('.mes');
+            const lastBlock = msgBlocks[msgBlocks.length - 1];
+            const swipeRightBtn = lastBlock?.querySelector('.swipe_right');
+            if (swipeRightBtn) {
+                swipeRightBtn.click();
+            } else {
+                // No swipe button in the DOM (e.g. swipe arrows disabled in user settings).
+                // Nothing safe to do here without risking a duplicate/mismatched message -
+                // surface it and let the user manually swipe.
+                routerEvent('Could not find the swipe button to retry - please swipe manually', 'error');
+                clearAttemptCleanly();
+            }
+        } else {
+            // Fresh generation that produced an empty bot message - safe to remove
+            // the whole placeholder and let /trigger generate a clean new one.
+            if (lastMsg && !lastMsg.is_user && isPlaceholderOutput(lastMsg.mes)) {
+                routerLog('Removing empty ghost message before retry');
+                ctx.chat.pop();
+                const msgBlocks = document.querySelectorAll('.mes');
+                if (msgBlocks.length > 0) {
+                    const lastBlock = msgBlocks[msgBlocks.length - 1];
+                    if (lastBlock && !lastBlock.classList.contains('is_user')) {
+                        lastBlock.remove();
+                    }
+                }
+            }
+            // Use /trigger to generate the next message fresh.
+            // Arm the one-shot retry token so the next interceptor invocation knows
+            // this is a continuation of the same user turn, no matter how long
+            // /trigger takes to actually fire it.
+            if (ctx.executeSlashCommandsWithOptions) {
+                releaseRouterAttemptLock();
+                pendingRetryAttempt = true;
+                await ctx.executeSlashCommandsWithOptions('/trigger', { showOutput: false });
+            }
         }
     } catch (err) {
         console.error(`[${WT_ROUTER_MODULE_NAME}] Retry failed:`, err);
@@ -788,8 +834,18 @@ function onGenerationStarted(type, options, dryRun) {
 
 function onGenerationEnded(messageId) {
     if (!settings?.enabled) return;
+    if (!currentlySelectedModel) { clearGenerationTimeout(); return; }
+
+    // Don't finalize while a generation is still in flight. The MESSAGE_RECEIVED
+    // safety net (and some providers' event ordering) can land here before the
+    // response text has actually been written to the chat - judging the attempt
+    // at that moment reads an unchanged message and falsely strikes the model as
+    // "no new output". Leave the timeout armed; the real end-event finalizes.
+    if (isGenerationLocked()) {
+        routerLog('Skipping premature finalize - generation still in progress');
+        return;
+    }
     clearGenerationTimeout();
-    if (!currentlySelectedModel) return;
 
     // Capture and clear the genId immediately so a second GENERATION_ENDED
     // event (e.g. from a retry, or the MESSAGE_RECEIVED safety net) can't re-enter
@@ -822,22 +878,16 @@ function onGenerationEnded(messageId) {
         return;
     }
 
-    // KEY FIX: if this message was already tagged by a previous successful generation,
-    // we are looking at stale content from before our retry. Don't count it as our success.
-    if (msg.extra?.weyland_router_model && (msg.extra.weyland_router_model !== currentlySelectedModel.id || (msg.extra.weyland_router_profile || '') !== (currentlySelectedModel.profileName || ''))) {
-        const failed = currentlySelectedModel;
-        routerLog(`Stale message detected (tagged by ${msg.extra.weyland_router_model} / ${msg.extra.weyland_router_profile || 'current'}, we are ${getModelLabel(currentlySelectedModel)}) - ignoring`);
-        failCurrentAttempt(failed, 'stale-output');
-        return;
-    }
-
     if (isPlaceholderOutput(content)) {
-        const failed = currentlySelectedModel;
-        if (String(msg.extra?.reasoning || '').trim()) {
-            routerEvent(`${failed.id} produced reasoning but no visible output`, 'warn');
+        // Some models put their entire reply inside the reasoning block and leave
+        // the visible body empty until downstream regex relocates it. Output is
+        // output - substantive reasoning counts as a successful generation.
+        const reasoningText = getReasoningText(msg).trim();
+        if (isPlaceholderOutput(reasoningText)) {
+            failCurrentAttempt(currentlySelectedModel, 'blank');
+            return;
         }
-        failCurrentAttempt(failed, 'blank');
-        return;
+        routerEvent(`${getModelLabel(currentlySelectedModel)} produced output inside the reasoning block - counting as success`, 'info');
     }
 
     // Success
@@ -868,16 +918,14 @@ function onGenerationStopped() {
     clearGenerationTimeout();
     if (isRetrying || !currentlySelectedModel) return;
 
-    const userStopLikely = Date.now() - manualStopRequestedAt < 1500;
-    if (userStopLikely) {
-        routerEvent(`Generation stopped by user - ${getModelLabel(currentlySelectedModel)} not penalized`, 'info');
-        clearAttemptCleanly();
-        return;
-    }
-
-    const failed = currentlySelectedModel;
-    routerLog(`Generation stopped without user stop intent for ${getModelLabel(failed)}`);
-    failCurrentAttempt(failed, 'stopped');
+    // GENERATION_STOPPED only fires when something actually stopped the generation
+    // (user clicked stop, pressed Esc, closed the tab mid-gen, etc). Router used to
+    // try to guess whether the user did it via a timing window on the stop button's
+    // pointerdown - too fragile (misses keyboard shortcuts, slow clicks, ST builds
+    // where the selector doesn't match) and would misfire into a retry cascade.
+    // Any stop is treated as intentional: no penalty, no retry.
+    routerEvent(`Generation stopped - ${getModelLabel(currentlySelectedModel)} not penalized`, 'info');
+    clearAttemptCleanly();
 }
 
 // =========================
@@ -1097,7 +1145,7 @@ function buildModalHtml() {
       <div style="color:#e0445c;font-size:16px;letter-spacing:2px;font-weight:900;">WEYLAND ROUTER</div>
       <div style="flex:1;"></div>
       <div id="wtr-status-pill" class="wtr-status-pill wtr-pill-off">DISABLED</div>
-      <button id="wtr-help-btn" class="wtr-btn-sm" title="What is Weyland Router?" style="padding:2px 8px;cursor:pointer;">?</button>
+      <button id="wtr-help-btn" class="wtr-btn-sm" title="What is Weyland Router?" style="padding:2px 8px;cursor:pointer;">What is this?</button>
       <button id="wtr-toggle-log" class="wtr-btn-sm" title="Show the routing activity log" style="padding:2px 10px;cursor:pointer;">Show Log</button>
       <button id="wtr-close-btn" class="wtr-btn-sm" title="Close Weyland Router" style="padding:2px 10px;cursor:pointer;">x</button>
     </div>
@@ -1196,6 +1244,10 @@ function buildModalHtml() {
             </ul>
             <div class="wtr-help-section">When things go sideways</div>
             <p>If a route errors, blanks, stalls, or times out, Router cools it down for the <b>Cooldown</b> duration and rolls the next eligible route. Open <b>Show Log</b> to watch it work in real time — copy the log if you need to show Lucky what happened.</p>
+            <div class="wtr-help-section" style="margin-top:12px;padding-top:10px;border-top:1px solid rgba(180,38,58,0.15);">Weyland Tavern</div>
+            <p>Made by <b>Kressa</b> and <b>Lucky</b> of the Weyland Tavern Project.</p>
+            <p>We are a diverse community based around Weyland University — a grounded AI roleplay environment dripping with lore, deeply detailed characters and tons of unique features!</p>
+            <p><a href="#" id="wtr-weyland-link" style="color:#e0445c;text-decoration:underline;cursor:pointer;">linktr.ee/weylanduniversity</a></p>
           </div>
         </div>
       </div>
@@ -1364,6 +1416,7 @@ function injectModal() {
     document.getElementById('wtr-close-btn').addEventListener('click', closeModal);
     document.getElementById('wtr-help-btn').addEventListener('click', showRouterHelp);
     document.getElementById('wtr-help-close').addEventListener('click', hideRouterHelp);
+    document.getElementById('wtr-weyland-link').addEventListener('click', e => { e.preventDefault(); window.open('https://linktr.ee/weylanduniversity', '_blank'); });
     document.getElementById('wtr-help-overlay').addEventListener('click', e => {
         // close when the user clicks the dim backdrop, not the card itself
         if (e.target === e.currentTarget) hideRouterHelp();
@@ -1595,10 +1648,6 @@ jQuery(async () => {
     eventSource.on(event_types.GENERATION_ENDED, onGenerationEnded);
     eventSource.on(event_types.MESSAGE_RECEIVED, onMessageReceivedForRouter);
     if (event_types.GENERATION_STOPPED) eventSource.on(event_types.GENERATION_STOPPED, onGenerationStopped);
-
-    $(document).on('pointerdown', '#mes_stop, .mes_stop', () => {
-        manualStopRequestedAt = Date.now();
-    });
 
     installToastrSuppression();
     setupUnhandledRejectionListener();
