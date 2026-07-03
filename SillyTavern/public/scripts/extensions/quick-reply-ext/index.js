@@ -9,7 +9,7 @@ import { delay } from "../../utils.js";
 import { isMobile } from "../../RossAscends-mods.js";
 import { updateSideCharacter } from "../Side-Character-Loader/index.js";
 
-import { getRandomInt, getCurrentCharacterName, getCurrentUserName, setLLModel, setBackground, tagExists, tagAdd, tagRemove, getPersonaBook, getCurrentCharacterWorldbook, getSpriteFolderName, setCostume, setExpression } from "./src/general.js";
+import { getRandomInt, getCurrentCharacterName, getCurrentUserName, setLLModel, setBackground, tagExists, tagAdd, tagRemove, getPersonaBook, getCurrentCharacterWorldbook, getSpriteFolderName, setCostume, setExpression, setCostumeAndExpression } from "./src/general.js";
 import { deleteGlobalVariable, deleteLocalVariable, deleteLocalVariables, flushInject, inject, setGlobalVariable, setLocalVariable } from "./src/variables.js"
 import { findLoreBookEntry, getCurrentChatbook, getEntryField, setEntryField } from "./src/lorebook.js";
 import { doButtons, doInput, doPopup } from "./src/popups.js";
@@ -209,9 +209,7 @@ async function OnAi(messageID) {
             DebugLog(`[P] MemorySaver: ${(performance.now() - MemorySaverStart).toFixed(4)}ms`);
 
             // CostumeChangeforBot Script
-            const CostumeChangeBotStart = performance.now();
-            await quickReplyApi.executeQuickReply("Weyland","CostumeChangeforBot");
-            DebugLog(`[P] CostumeChangeForBot: ${(performance.now() - CostumeChangeBotStart).toFixed(4)}ms`);
+            await CostumeChangeBot(chatMessage);
 
             // AutoBG Script
             await AutoBG(chatMessage);
@@ -313,9 +311,7 @@ async function OnSwipe(messageID) {
         const newSwipe = charMessage?.swipe_id >= charMessage?.swipes?.length
 
         if (charName && newSwipe) {
-            //await quickReplyApi.executeQuickReply("Weyland", "CostumeChangeforBot");
-            await Expressions(charName, charMessage);
-            await SideCharacters(charName, charMessage);
+            await CostumeChangeBot(charMessage);
             await AutoBG(charMessage);
         }
     } catch (error) {
@@ -350,11 +346,14 @@ async function OnChatChanged(chatbookName) {
  * @param {any} args 
  */
 async function OnNewChat(args) {
-    // This is called only the first time a character is selected after being downloaded for some reason
+    // This is called when a person creates a chat without deleting the previous one
     try {
         DebugLog(`OnNewChat called.`);
 
-        
+        if (getGlobalVariable("AltGreetingMessage") !== "true") {
+            doPopup({wide: true}, `<font size="5"><strong>Did you know this tip?</strong></font><br><br>You can access alternate greetings for Lucky's characters by starting a new chat and clicking on the left or right arrows at the bottom of the opening message!<br>You can also press the left or right arrows to shift between them freely.<br><br>We hope you're enjoying your stay here at Weyland University!</a>`);
+            setGlobalVariable("AltGreetingMessage", "true");
+        }
     } catch (error) {
         console.error(`[WQR] OnNewChat Error:`, error);
     }
@@ -418,13 +417,15 @@ async function TitleBarColors() {
             await quickReplyApi.executeQuickReply("Weyland", "XXX");
         }
         const expSave = getLocalVariable("ExpSave");
-        if (!expSave) {
-            await Expressions(charName);
+        if (/Weybot|Mirror Weyland|Kinsband Manor/.test(charName)) {
+            await CostumeChangeBot();
         } else {
-            DebugLog(`Expression reset: ${getSpriteFolderName() || charName}, ${expSave}`);
-            await setExpression(expSave);
-        }
-        if (getGlobalVariable("SideCharacters") === "On") {
+            if (!expSave) {
+                await Expressions(charName);
+            } else {
+                DebugLog(`Expression reset: ${getSpriteFolderName() || charName}, ${expSave}`);
+                await setExpression(expSave);
+            }
             await SideCharacters(charName);
         }
         if (getGlobalVariable("AutoBG") !== "false") {
@@ -469,8 +470,9 @@ async function TitleBarColors() {
  * OnChatChanged & OnSwipe
  * @param {string} [charName]
  * @param {import("./src/chat.js").ChatMessage} [charMessage]
+ * @param {boolean} [disableSetting]
  */
-async function Expressions(charName, charMessage) {
+async function Expressions(charName, charMessage, disableSetting=false) {
     const PerformanceStart = performance.now();
     try {
         if (charMessage === undefined) charMessage = getLastMessage("char");
@@ -504,14 +506,18 @@ async function Expressions(charName, charMessage) {
                 if (expressions.includes(expression)) {
                     DebugLog(`Expressions: Found: ${expression}`);
                     setLocalVariable("ExpSave", expression);
-                    await setExpression(expression);
+                    if (!disableSetting) { 
+                        await setExpression(expression)
+                    }
                     break;
                 }
             }
         } else if (!getLocalVariable("ExpSave")) {
             DebugLog(`Expressions: No last expression`);
             setLocalVariable("ExpSave", "neutral");
-            await setExpression("neutral");
+            if (!disableSetting) {
+                await setExpression("neutral");
+            }
         }
         if (charName === "Rosa" && chat.length === 1 && charMessage.swipe_id === 0) {
             await setCostume("Rosa/Intro");
@@ -538,12 +544,12 @@ async function SideCharacters(charName, charMessage) {
         if (!charName) charName = getCurrentCharacterName();
         if (!charName) return "{{char}} undefined";
 
-        const {listOfCharacters, aliasLookup} = await GetCharacterNamesAndAliases(); 
-        ;
+        const {charactersWithExpressions, aliasLookup} = await GetCharacterNamesAndAliases();
+
         const foundCharacters = [...new Set(
             [...charMessage.mes.matchAll(/_{0,2}(?:Mirror )?(.+?):_{1,2}/g)]
                 .map(m => aliasLookup.get(m[1]) ?? m[1])
-                .filter(name => listOfCharacters.includes(name))
+                .filter(name => charactersWithExpressions.includes(name))
             )];
 
         if (!foundCharacters?.length) {
@@ -555,30 +561,30 @@ async function SideCharacters(charName, charMessage) {
         DebugLog(`SideCharacters: Discovered: ${foundCharacters.length}`);
 
         const pickedChar = foundCharacters.length > 1 ? foundCharacters[Math.floor(Math.random() * foundCharacters.length)] : foundCharacters[0];
-        let weybotCostumeType = "Regular Outfit";
+        let costume = "Regular Outfit";
 
         if (charName !== "Muse" && getGlobalVariable("NSFW") === "false") {
             if (charMessage.mes.includes("[LG]")) {
-                weybotCostumeType = "Lingerie";
+                costume = "Lingerie";
             } else if (charMessage.mes.includes("[NK]")) {
-                weybotCostumeType = "Naked";
+                costume = "Naked";
             }
         }
 
         switch (pickedChar) {
             case "Muse":
-                weybotCostumeType = getGlobalVariable("NSFW") ? "SFW" : "Naked";
+                costume = getGlobalVariable("NSFW") ? "SFW" : "Naked";
                 break;
             case "Ṇ̶̰̼͘a̶͍̅́̒r̵̓̏̉̈́ā̸͒̔̄":
-                weybotCostumeType = `${getGlobalVariable("NaraCommunity")}${weybotCostumeType}`
+                costume = `${getGlobalVariable("NaraCommunity")}${costume}`
                 break;
         }
 
-        const costume = `${pickedChar}/${weybotCostumeType}`
+        const spriteFolder = `${pickedChar}/${costume}`
 
         DebugLog(`SideCharacters: Picked "${pickedChar}"`);
 
-        updateSideCharacter({character: costume, expression: getLocalVariable("ExpSave")}).then(result => {
+        updateSideCharacter({character: spriteFolder, expression: getLocalVariable("ExpSave")}).then(result => {
             if (result) DebugLog(`SideCharacters: Update:`, result);
         }).catch(err => {
             console.log(`[WQR] SideCharacters Error:`, err);
@@ -594,32 +600,43 @@ async function SideCharacters(charName, charMessage) {
  * Helper Function
  * SideCharacters
  * @param {string} [charName]
- * @param {boolean} [subbots]
- * @returns {Promise<{listOfCharacters: string[], aliasLookup: Map<string,string>}>}
+ * @returns {Promise<{listOfCharacters: string[], charactersWithExpressions: string[], aliasLookup: Map<string,string>}>}
  */
-async function GetCharacterNamesAndAliases(charName, subbots=false) {
+async function GetCharacterNamesAndAliases(charName) {
     if (!charName) charName = getCurrentCharacterName();
-    const listOfCharacters = [
-        "Aiko", "Ava", "Bap", "Belle", "Bianca", "Blake", "Cairo", "Ellie", "Fasti", "Gem", "Hannah", "Indigo", "Jenn", "Kai",
-        "Karmen", "Kiera", "Koshizu", "Kris", "Lentyl", "Lucy", "Luna", "Lurkle", "Lyris", "Mika", "Nix", "Rein", "Serra",
-        "Seth", "Summer", "Vera", "Vesper", "Warren", "Vindica", "Aethel", "Rivera", "Ṇ̶̰̼͘a̶͍̅́̒r̵̓̏̉̈́ā̸͒̔̄", "Kressa", "Bastet", "Rivet",
-        "Gemini", "Jericho", "Loona", "Willow", "Rosa", "Eve", "Rosanna", "Briar", "Muse", "Sunny",
-        "Khepri", "Shani", "Nefara", "Dash", "Miu", "Chaska", "Sofya", "Nathan", "Yue-Lin", "Professor Akiyama",
+    /** @type {string[]} */
+    const charactersWithExpressions = [
+        "Aiko", "Ava", "Bap", "Bastet", "Belle", "Bianca", "Blake", "Briar", "Cairo", "Dash", "Ellie", "Eve", "Fasti",
+        "Gemini", "Hannah", "Indigo", "Jenn", "Kai", "Karmen", "Khepri", "Kiera", "Koshizu", "Kressa", "Kris", "Lentyl",
+        "Loona", "Lucy", "Luna", "Lurkle", "Lyris", "Mika", "Muse", "Ṇ̶̰̼͘a̶͍̅́̒r̵̓̏̉̈́ā̸͒̔̄", "Nathan", "Nefara", "Nix", "Professor Akiyama",
+        "Rein", "Rivera", "Rivet", "Rosa", "Serra", "Seth", "Shani", "Sofya", "Summer", "Sunny", "Vera", "Vesper", "Vindica", 
+        "Warren", "Willow",
         ...(charName !== "Cerberus Sisters" ? ["Astrid", "Neshe", "Fawne"] : []),
-        ...(subbots ? [
-            "Adrian", "Ahset", "Thorne", "Ben", "Deredra", "Derek", "Dmitri", "Emily", "Garret", "Gaven", "Jericho", "Kellen",
-            "Kyana", "Leo", "Lexa", "Margaret", "Mark", "Mason", "Miu", "Nathan", "Navine", "Orville", "Remy", "Richard", "Rivet",
-            "Skye", "Sobek", "Tessa", "Tom", "Travis", "Mr. Wolfy", "Zora"
-        ] : [])
+        ...[
+            getGlobalVariable("OCPick1"),
+            getGlobalVariable("OCPick2"),
+            getGlobalVariable("OCPick3")
+        ].filter(x => typeof x === 'string' && x !== "")
+    ].filter(name => !charName?.includes(name));
+
+    const listOfCharacters = [
+        "Adrian", "Aethel", "Ahset", "Aiko", "Astrid", "Ava", "Baphrodel", "Bastet", "Belle", "Ben", "Bianca", "Blake", "Briar",
+        "Brietta", "Cairo", "Chaska", "Dash", "Deredra", "Derek", "Dmitri", "Ellie", "Emily", "Eve", "Fasti", "Fawne", "Garret",
+        "Gaven", "Gem", "Gemini", "Hannah", "Indigo", "Jenn", "Jericho", "Kai", "Karmen", "Kellen", "Khepri", "Kiera", "Koshizu",
+        "Kressa", "Kris", "Kyana", "Lentyl", "Leo", "Lexa", "Loona", "Loren", "Lucy", "Luna", "Lurkle", "Lyris", "Margaret", "Mark",
+        "Mason", "Mika", "Miu", "Muse", "Ṇ̶̰̼͘a̶͍̅́̒r̵̓̏̉̈́ā̸͒̔̄", "Nathan", "Navine", "Nefara", "Neshe", "Nix", "Orville", "Rein", "Remy", "Richard",
+        "Rivera", "Rivet", "Rosa", "Professor Akiyama", "Serra", "Seth", "Shani", "Skye", "Sobek", "Sofya", "Summer", "Sunny", "Tessa", 
+        "Thorne", "Tom", "Travis", "Vera", "Vesper", "Vindica", "Warren", "Willow", "Mr. Wolfy", "Yue-Lin", "Zora"
     ].filter(name => !charName?.includes(name));
 
     const characterAliases = {
         "Professor Akiyama": ["Professor Akiyama", "Akiyama", "Sayori"],
         "Ṇ̶̰̼͘a̶͍̅́̒r̵̓̏̉̈́ā̸͒̔̄": ["Nara"],
         "Yue-Lin": ["YueLin"],
-        ...(subbots && {
-            "Mr. Wolfy": ["Wolfy"]
-        })
+        "Nix": ["Nicole"],
+        "Dash": ["Dakota"],
+        "Mr. Wolfy": ["Wolfy"],
+        "Thorne": ["Aris", "Dr. Thorne"]
     };
 
     const aliasLookup = new Map();
@@ -630,7 +647,7 @@ async function GetCharacterNamesAndAliases(charName, subbots=false) {
         }
     }
 
-    return { listOfCharacters, aliasLookup };
+    return { listOfCharacters, charactersWithExpressions, aliasLookup };
 }
 
 /**
@@ -1971,6 +1988,149 @@ async function Relationships(){
         DebugLog(`[P] Relationships: ${(performance.now()-PerformanceStart).toFixed(4)}ms`);
     } catch (error) {
         console.log(`[WQR] Relationships Error:`, error);
+    }
+}
+
+
+/** 
+ * @param {import("./src/chat.js").ChatMessage} [charMessage]
+ * @param {string} [charName]
+*/
+async function CostumeChangeBot(charMessage, charName) {
+    try {
+        if (!charMessage) charMessage = getLastMessage("char");
+        if (!charMessage) return "No charMessage";
+        const charText = charMessage.mes;
+        charName = charName ?? charMessage.name ?? getCurrentCharacterName();
+        await Expressions(charName, charMessage, true);
+        let openWorld = false;
+        if (charText.includes("Phone Status")) {
+            await setCostume("Phone");
+        } else if (/Weybot|Mirror Weyland|Kinsband Manor/.test(charName)) {
+            await OpenWorldCostumes(charName, charMessage);
+            openWorld = true;
+        } else {
+            await quickReplyApi.executeQuickReply("Weyland", "AutoCostumes");
+        }
+        if (!openWorld) {
+            await setExpression(getLocalVariable("ExpSave") ?? "neutral");
+            await SideCharacters(charName, charMessage);
+        }
+    } catch (error) {
+        console.log(`[WQR] CostumeChangeBot Error:`, error);
+        return "Error";
+    }
+}
+
+/** 
+ * @param {string} [charName]
+ * @param {import("./src/chat.js").ChatMessage} [charMessage]
+*/
+async function OpenWorldCostumes(charName, charMessage) {
+    const PerformanceStart = performance.now();
+    try {
+        if (!charMessage) charMessage = getLastMessage("char");
+        if (!charMessage) return;
+        const lookForSide =  !(isMobile() || getGlobalVariable("AutoCostume") === "No");
+        charName = charName ?? charMessage.name ?? getCurrentCharacterName();
+
+        const mainRegex = /_{0,2}(?:Mirror )?(.+?):_{1,2}/g;
+        const altRegex = /\b([A-Z][A-Za-z\-]{,16})\b(?= (?:[A-Za-z]{2,}(?:s|[ie]d)\b|is[^.,!?\n]+[A-Za-z]+ing\b))/g;
+
+        const {charactersWithExpressions, aliasLookup} = await GetCharacterNamesAndAliases("Weybot");
+
+        const foundCharacters = [...new Set(
+            [...charMessage.mes.matchAll(mainRegex)]
+                .map(m => aliasLookup.get(m[1]) ?? m[1])
+                .filter(name => charactersWithExpressions.includes(name))
+            )];
+        if (foundCharacters.length < 2) {
+            foundCharacters.push(...new Set(
+                [...charMessage.mes.matchAll(altRegex)]
+                    .map(m => aliasLookup.get(m[1]) ?? m[1])
+                    .filter(name => charactersWithExpressions.includes(name) && !foundCharacters.includes(name))
+            ));
+        }
+
+        if (!foundCharacters?.length) {
+            DebugLog(`SideCharacters: No side-characters found.`);
+            updateSideCharacter({clear: 'true'});
+            return;
+        }
+
+        DebugLog(`OpenWorldCostumes: Discovered: ${foundCharacters.length}`);
+        
+        const { pickedCharMain, pickedCharSide } = (() => {
+            let pickedCharMain = foundCharacters.splice(0, 1)[0];
+
+            if (charName === "Kinsbane Manor") {
+                const aikoIndex = foundCharacters.indexOf("Aiko");
+                if (aikoIndex !== undefined) {
+                    pickedCharMain = foundCharacters.splice(aikoIndex, 1)[0];
+                } else if (/ghost/i.test(charMessage.mes)) {
+                    pickedCharMain = "Kinsbane Manor";
+                }
+            } else if (foundCharacters.length > 2) {
+                const firstPick = Math.floor(Math.random() * foundCharacters.length);
+                pickedCharMain = foundCharacters.splice(firstPick, 1)[0];
+            }
+
+            const pickedCharSide = lookForSide ? foundCharacters[Math.floor(Math.random() * foundCharacters.length)] : undefined;
+
+            return { pickedCharMain, pickedCharSide };
+        })();
+
+        const NSFW = getGlobalVariable("NSFW") === "false";
+        const defaultCostume = NSFW 
+            ? "Regular Outfit"
+            : charMessage.mes.includes("[LG]") 
+                ? "Lingerie"
+                : charMessage.mes.includes("[NK]") 
+                    ? "Naked"
+                    : "Regular Outfit";
+        let mainCostume = defaultCostume;
+        let sideCostume = defaultCostume;
+
+        switch (pickedCharMain) {
+            case "Muse":
+                mainCostume = NSFW ? "SFW" : "Naked";
+                break;
+            case "Ṇ̶̰̼͘a̶͍̅́̒r̵̓̏̉̈́ā̸͒̔̄":
+                mainCostume = `${getGlobalVariable("NaraCommunity")}${mainCostume}`
+                break;
+            case "Kinsbane Manor":
+                mainCostume = "Ghost";
+                setLocalVariable("ExpSave", "neutral");
+                break;
+        }
+        switch (pickedCharSide) {
+            case "Muse":
+                sideCostume = NSFW ? "SFW" : "Naked";
+                break;
+            case "Ṇ̶̰̼͘a̶͍̅́̒r̵̓̏̉̈́ā̸͒̔̄":
+                sideCostume = `${getGlobalVariable("NaraCommunity")}${sideCostume}`
+                break;
+        }
+
+        if (getLocalVariable("ExpSave") === "") {
+            await Expressions(charName, charMessage, true);
+        }
+        const expression = getLocalVariable("ExpSave");
+        
+        await setCostumeAndExpression(pickedCharMain, mainCostume, expression);
+        DebugLog(`OpenWorldCostumes: Set left-side to "${pickedCharMain}/${mainCostume}"`);
+        if (lookForSide) {
+            if (pickedCharSide) {
+                await updateSideCharacter({character: `${pickedCharSide}/${sideCostume}`, expression: getLocalVariable("ExpSave")});
+                DebugLog(`OpenWorldCostumes: Set right-side to "${pickedCharSide}/${sideCostume}"`);
+            } else {
+                updateSideCharacter({clear: "true"});
+                DebugLog(`OpenWorldCostumes: Cleared right-side.`);
+            }
+        }
+        DebugLog(`[P] OpenWorldCostumes: ${(performance.now() - PerformanceStart).toFixed(4)}ms`)
+    } catch (error) {
+        console.log(`[WQR] AltExpressions Error:`, error);
     }
 }
 
