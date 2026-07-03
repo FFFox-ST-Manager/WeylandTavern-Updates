@@ -209,7 +209,7 @@ async function OnAi(messageID) {
             DebugLog(`[P] MemorySaver: ${(performance.now() - MemorySaverStart).toFixed(4)}ms`);
 
             // CostumeChangeforBot Script
-            await CostumeChangeBot(chatMessage);
+            await CostumeChangeBot(chatMessage, charName);
 
             // AutoBG Script
             await AutoBG(chatMessage);
