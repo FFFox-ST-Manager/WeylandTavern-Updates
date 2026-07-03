@@ -476,16 +476,17 @@ export async function setExpression(expression, characterName) {
 }
 
 /**
+ * @param {string} characterName
  * @param {string} costume;
- * @param {string} [characterName]
  * @param {string} [expression]
  * @returns 
  */
-export async function setCostume2(costume, characterName, expression) {
+export async function setCostumeAndExpression(characterName, costume, expression) {
     expression = expression ?? getLocalVariable("ExpSave") ?? "neutral";
     if (!expression) return;
+    await setCostume(`${characterName}/${costume}`);
     // @ts-ignore
-    await sendExpressionCall(getSpriteFolderName(characterName, costume), expression.toLowerCase());
+    await sendExpressionCall(`${characterName}/${costume}`, expression.toLowerCase());
 }
 
 /**
@@ -508,7 +509,7 @@ export async function setCostume(folder) {
 
     // @ts-ignore
     $('#expression_override').val(folder.trim());
-    ExpressionOverride(charName);
+    await ExpressionOverride(charName);
 
     return;
 }
