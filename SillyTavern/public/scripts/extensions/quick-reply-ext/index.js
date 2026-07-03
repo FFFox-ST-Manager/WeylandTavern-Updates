@@ -209,7 +209,7 @@ async function OnAi(messageID) {
             DebugLog(`[P] MemorySaver: ${(performance.now() - MemorySaverStart).toFixed(4)}ms`);
 
             // CostumeChangeforBot Script
-            await CostumeChangeBot(chatMessage);
+            await CostumeChangeBot(chatMessage, charName);
 
             // AutoBG Script
             await AutoBG(chatMessage);
@@ -910,6 +910,10 @@ async function BG(charMessage, charName) {
                 if (checkMessage("Library Nook")) return "library nook.avif";
                 if (checkMessage(["Library", "Nook"])) return "library.avif";
 
+                // Hot spring / tub
+                if (checkMessage("Hot Tub")) return "Hot tub.avif";
+                if (checkMessage(["Hot Spring", "Onsen", "Wolf Spring"])) return "onsen 2.avif";
+
                 // Party
                 if (checkMessage("Party")) {
                     if (checkMessage("Pool")) return "pool party.avif";
@@ -921,10 +925,6 @@ async function BG(charMessage, charName) {
                 // Office / Lab
                 if (checkMessage("Office")) return "Office.avif";
                 if (checkMessage(["Lab", "Laboratory"])) return "Lab.avif";
-
-                // Hot spring / tub
-                if (checkMessage("Hot Tub")) return "Hot tub.avif";
-                if (checkMessage(["Hot Spring", "Onsen", "Wolf Spring"])) return "onsen 2.avif";
 
                 // Hotel / Motel
                 if (checkMessage(["Hotel", "Motel"])) {
