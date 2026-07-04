@@ -7,6 +7,7 @@ import { selected_world_info, onWorldInfoChange } from "../../world-info.js";
 import { oai_settings } from "../../openai.js";
 import { delay } from "../../utils.js";
 import { isMobile } from "../../RossAscends-mods.js";
+import { setPersonaLockState } from "../../personas.js";
 import { updateSideCharacter } from "../Side-Character-Loader/index.js";
 
 import { getRandomInt, getCurrentCharacterName, getCurrentUserName, setLLModel, setBackground, tagExists, tagAdd, tagRemove, getPersonaBook, getCurrentCharacterWorldbook, setCostume, setExpression, setCostumeAndExpression, getCharacterCostumeFromText } from "./src/general.js";
@@ -16,7 +17,6 @@ import { doButtons, doInput, doPopup } from "./src/popups.js";
 import { getFirstMessage, getLastMessage, getMessages, hideMessages, unhideMessages } from "./src/chat.js";
 import strings from "./src/strings.js";
 import { scenarios, tails } from "./src/scenarios.js";
-import { setPersonaLockState } from "../../personas.js";
 import { charPer } from "./src/charper.js";
 
 const debug = false;
@@ -1226,11 +1226,12 @@ async function CharPer(charName) {
                 if (keys.length) {
                     const lastKey = keys[keys.length-1];
                     for (const key of keys) {
+                        DebugLog(`CharPer set ${key}`);
                         setLocalVariable(key, config.vars[key], key !== lastKey)
                     }
                 }
             } catch {
-                console.error(`[WQR] Scenarios Error: Failed to set charPer vars for "${charName}"`);
+                console.error(`[WQR] Failed to set charPer vars for "${charName}"`);
                 return "Error"
             }
         }
@@ -2027,22 +2028,29 @@ async function AutoCostumes(charName, charMessage) {
 async function SetupCostumesAndTags(charName, charScenarios) {
     try {
         charName = charName || getCurrentCharacterName();
+        DebugLog(`SetupCostumesAndTags charName: ${charName}`);
         if (!charName) return;
         charScenarios = charScenarios || scenarios.get(charName);
         if (!charScenarios) return;
-        if (charScenarios.tags && charScenarios.tags.length) {
+        DebugLog(`SetupCostumesAndTags charScenarios:`, charScenarios);
+        if (Array.isArray(charScenarios?.tags)) {
             try {
                 for (const tag of charScenarios.tags) {
-                    if (!tagExists(tag, charName)) tagAdd(tag, charName);
+                    const exists = tagExists(tag, charName);
+                    DebugLog(`Add "${tag}" if not exists on "${charName}": Exists?: ${exists}`);
+                    if (!exists) {
+                        tagAdd(tag, charName);
+                    }
                 }
             } catch {
                 console.error(`[WQR] Scenarios Error: Failed to set tags for "${charName}"`, charScenarios.tags);
             }
         }
 
-        if (charScenarios.removeTags && charScenarios.removeTags.length) {
+        if (Array.isArray(charScenarios?.removeTags)) {
             try {
                 for (const tag of charScenarios.removeTags) {
+                    DebugLog(`Remove "${tag}" if exists on "${charName}": Exists?: ${tagExists(tag, charName)}`);
                     if (tagExists(tag, charName)) tagRemove(tag, charName);
                 }
             } catch {
@@ -2050,7 +2058,7 @@ async function SetupCostumesAndTags(charName, charScenarios) {
             }
         }
 
-        if (charScenarios.costumes && charScenarios.costumes.length) {
+        if (Array.isArray(charScenarios?.costumes)) {
             try {
                 for (let costumeID = 1; costumeID <= charScenarios.costumes.length; costumeID++) {
                     const costumeVar = `O${costumeID}`;
