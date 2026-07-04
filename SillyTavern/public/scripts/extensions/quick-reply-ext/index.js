@@ -141,9 +141,26 @@ async function OnUser(messageID) {
             }
 
             // LTMRav?
-            if (getLocalVariable("LTMRav") === "true") {
-                setLocalVariable("LTMRav", "false");
-                await quickReplyApi.executeQuickReply("Weyland","XXX");
+            if (getLocalVariable("MIP") !== "true") {
+                if (getLocalVariable("LTMRav") === "true") {
+                    setLocalVariable("LTMRav", "false");
+                    await quickReplyApi.executeQuickReply("Weyland","XXX");
+                    onWorldInfoChange({ state: 'on', silent: 'true' }, 'Weyland');
+                    if (characterName === "Kris") {
+                        setLocalVariable("Krisrav", getLocalVariable("temprav"));
+                    }
+                    await quickReplyApi.executeQuickReply("Weyland","Framework");
+                    await unhideMessages({start: 0, end: messageID+2});
+                    const ModelSwitched = getGlobalVariable("ModelSwitched");
+                    if (ModelSwitched !== "") {
+                        await setLLModel(ModelSwitched);
+                        deleteGlobalVariable("ModelSwitched");
+                    }
+                    if (getLocalVariable("EntryNumber") > 1) {
+                        setLocalVariable("LTMDisabler", "false");
+                        await quickReplyApi.executeQuickReply("Weyland","LTMDisabler");
+                    }
+                }
             }
 
             // MuseFirst
@@ -704,26 +721,6 @@ async function LTMCounter(messageID, userName) {
                     deleteGlobalVariable("Thinking");
                     checks.skipLTMCounter = true;
                     await sendMessageAsUser(strings.ltmp, extractMessageBias(strings.ltmp), undefined, false, "LTM Creation in Process...");
-                    (async function () {
-                        await delay(2500);
-                        setLocalVariable("LTMRav", "false");
-                        await quickReplyApi.executeQuickReply("Weyland","XXX");
-                        onWorldInfoChange({ state: 'on', silent: 'true' }, 'Weyland');
-                        if (characterName === "Kris") {
-                            setLocalVariable("Krisrav", getLocalVariable("temprav"));
-                        }
-                        await quickReplyApi.executeQuickReply("Weyland","Framework");
-                        await unhideMessages({start: 0, end: messageID+2});
-                        const ModelSwitched = getGlobalVariable("ModelSwitched");
-                        if (ModelSwitched !== "") {
-                            await setLLModel(ModelSwitched);
-                            deleteGlobalVariable("ModelSwitched");
-                        }
-                        if (getLocalVariable("EntryNumber") > 1) {
-                            setLocalVariable("LTMDisabler", "false");
-                            await quickReplyApi.executeQuickReply("Weyland","LTMDisabler");
-                        }
-                    })().catch(() => {});
                     setLocalVariable("MIP", "true");
                 } else {
                     switch (choice) {
