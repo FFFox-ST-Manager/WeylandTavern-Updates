@@ -19,7 +19,7 @@ import strings from "./src/strings.js";
 import { scenarios, tails } from "./src/scenarios.js";
 import { charPer } from "./src/charper.js";
 
-const debug = false;
+const debug = true;
 
 /**
  * Debug Logs
@@ -2028,22 +2028,29 @@ async function AutoCostumes(charName, charMessage) {
 async function SetupCostumesAndTags(charName, charScenarios) {
     try {
         charName = charName || getCurrentCharacterName();
+        DebugLog(`SetupCostumesAndTags charName: ${charName}`);
         if (!charName) return;
         charScenarios = charScenarios || scenarios.get(charName);
         if (!charScenarios) return;
-        if (charScenarios.tags && charScenarios.tags.length) {
+        DebugLog(`SetupCostumesAndTags charScenarios:`, charScenarios);
+        if (Array.isArray(charScenarios?.tags)) {
             try {
                 for (const tag of charScenarios.tags) {
-                    if (!tagExists(tag, charName)) tagAdd(tag, charName);
+                    const exists = tagExists(tag, charName);
+                    DebugLog(`Add "${tag}" if not exists on "${charName}": Exists?: ${exists}`);
+                    if (!exists) {
+                        tagAdd(tag, charName);
+                    }
                 }
             } catch {
                 console.error(`[WQR] Scenarios Error: Failed to set tags for "${charName}"`, charScenarios.tags);
             }
         }
 
-        if (charScenarios.removeTags && charScenarios.removeTags.length) {
+        if (Array.isArray(charScenarios?.removeTags)) {
             try {
                 for (const tag of charScenarios.removeTags) {
+                    DebugLog(`Remove "${tag}" if exists on "${charName}": Exists?: ${tagExists(tag, charName)}`);
                     if (tagExists(tag, charName)) tagRemove(tag, charName);
                 }
             } catch {
@@ -2051,7 +2058,7 @@ async function SetupCostumesAndTags(charName, charScenarios) {
             }
         }
 
-        if (charScenarios.costumes && charScenarios.costumes.length) {
+        if (Array.isArray(charScenarios?.costumes)) {
             try {
                 for (let costumeID = 1; costumeID <= charScenarios.costumes.length; costumeID++) {
                     const costumeVar = `O${costumeID}`;

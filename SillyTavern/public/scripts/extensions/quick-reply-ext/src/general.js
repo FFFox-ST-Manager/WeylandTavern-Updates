@@ -227,10 +227,12 @@ export function tagExists(tagName, charName=null) {
     // @ts-ignore
     if (!charName) charName = getCurrentCharacterName();
     const key = searchCharByName(charName);
-    if (!key) return 'false';
+    console.log(`[WQR] searchCharByName ${charName}: ${key}`);
+    if (!key) return false;
     const tag = paraGetTag(tagName);
-    if (!tag) return 'false';
-    return String(tag_map[key] && tag_map[key].includes(tag.id));
+    console.log(`[WQR] paraGetTag ${tagName}:`, tag);
+    if (!tag) return false;
+    return tag_map[key] && tag_map[key].includes(tag.id);
 }
 
 /**
@@ -241,20 +243,23 @@ export function tagAdd(tagName, charName=null) {
     // @ts-ignore
     if (!charName) charName = getCurrentCharacterName();
     const key = searchCharByName(charName);
-    if (!key) return 'false';
+    console.log(`[WQR] searchCharByName ${charName}: ${key}`);
+    if (!key) return false;
     if (typeof tagName === "string") {
         const tag = paraGetTag(tagName, { allowCreate: true });
-        if (!tag) return 'false';
+        console.log(`[WQR] paraGetTag ${tagName}:`, tag);
+        if (!tag) return false;
         const result = addTagsToEntity(tag, key);
         printCharacters();
         return String(result);
-    } else {
+    } else if (Array.isArray(tagName)) {
         /** @type {import("../../../tags.js").Tag[]} */ const tags = [];
         for (const name of tagName) {
             const tag = paraGetTag(name, { allowCreate: true });
+            console.log(`[WQR] paraGetTag ${tagName}:`, tag);
             if (tag) tags.push(tag);
         }
-        if (tags.length <= 0) return 'false';
+        if (tags.length <= 0) return false;
         const result = addTagsToEntity(tags, key);
         printCharacters();
         return String(result);
