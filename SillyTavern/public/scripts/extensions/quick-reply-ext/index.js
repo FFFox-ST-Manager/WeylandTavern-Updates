@@ -7,6 +7,7 @@ import { selected_world_info, onWorldInfoChange } from "../../world-info.js";
 import { oai_settings } from "../../openai.js";
 import { delay } from "../../utils.js";
 import { isMobile } from "../../RossAscends-mods.js";
+import { setPersonaLockState } from "../../personas.js";
 import { updateSideCharacter } from "../Side-Character-Loader/index.js";
 
 import { getRandomInt, getCurrentCharacterName, getCurrentUserName, setLLModel, setBackground, tagExists, tagAdd, tagRemove, getPersonaBook, getCurrentCharacterWorldbook, setCostume, setExpression, setCostumeAndExpression, getCharacterCostumeFromText } from "./src/general.js";
@@ -16,7 +17,6 @@ import { doButtons, doInput, doPopup } from "./src/popups.js";
 import { getFirstMessage, getLastMessage, getMessages, hideMessages, unhideMessages } from "./src/chat.js";
 import strings from "./src/strings.js";
 import { scenarios, tails } from "./src/scenarios.js";
-import { setPersonaLockState } from "../../personas.js";
 import { charPer } from "./src/charper.js";
 
 const debug = false;
@@ -1226,11 +1226,12 @@ async function CharPer(charName) {
                 if (keys.length) {
                     const lastKey = keys[keys.length-1];
                     for (const key of keys) {
+                        DebugLog(`CharPer set ${key}`);
                         setLocalVariable(key, config.vars[key], key !== lastKey)
                     }
                 }
             } catch {
-                console.error(`[WQR] Scenarios Error: Failed to set charPer vars for "${charName}"`);
+                console.error(`[WQR] Failed to set charPer vars for "${charName}"`);
                 return "Error"
             }
         }
