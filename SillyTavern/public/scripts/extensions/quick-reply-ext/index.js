@@ -19,7 +19,7 @@ import strings from "./src/strings.js";
 import { scenarios, tails } from "./src/scenarios.js";
 import { charPer } from "./src/charper.js";
 
-const debug = true;
+const debug = false;
 
 /**
  * Debug Logs
