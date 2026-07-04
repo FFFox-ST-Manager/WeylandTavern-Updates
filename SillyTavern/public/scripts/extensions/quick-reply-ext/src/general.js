@@ -9,18 +9,8 @@ import { power_user } from "../../../power-user.js";
 import { addTagsToEntity, removeTagFromEntity, searchCharByName, TAG_FOLDER_DEFAULT_TYPE, tag_map, tags } from "../../../tags.js";
 import { textgen_types, textgenerationwebui_settings } from "../../../textgen-settings.js";
 import { equalsIgnoreCaseAndAccents, getCharaFilename, onlyUnique, uuidv4 } from "../../../utils.js";
-import { getLocalVariable } from "../../../variables.js";
-// @ts-ignore
-// @ts-ignore
-import { getExpressionLabel, sendExpressionCall } from "../../expressions/index.js";
-// @ts-ignore
-// @ts-ignore
-import { getRegexScripts } from "../../regex/index.js";
-// @ts-ignore
-// @ts-ignore
-import { getLastMessage } from "./chat.js";
-// @ts-ignore
-import strings from "./strings.js";
+import { getGlobalVariable, getLocalVariable } from "../../../variables.js";
+import { sendExpressionCall } from "../../expressions/index.js";
 
 /**
  * @param {number} min
@@ -78,6 +68,57 @@ export function getCurrentCharacterWorldbook() {
         return characters[charID].data?.extensions?.world
     } catch {
         return
+    }
+}
+
+/**
+ * @param {string} charText
+ * @param {string} [charName]
+ * @param {boolean} [allowExtra]
+ * @returns 
+ */
+export function getCharacterCostumeFromText(charText, charName="", allowExtra) {
+    let costume = "Regular Outfit";
+    try {
+        allowExtra = allowExtra ?? getGlobalVariable("PPP1") === "true";
+        if (!charText) return "Regular Outfit";
+        const textLength = charText.length;
+        if (textLength > 50) {
+            charText = charText.slice(Math.floor(textLength*0.65));
+        }
+        const costumeTag = [...charText.matchAll(/\] ?\[(\w+?)\]/g).map(m => m[1])].reverse()[0];
+        const extraTag = /O\d/.test(costumeTag);
+        const NSFW = getGlobalVariable("NSFW") === "false";
+        if (allowExtra && extraTag) {
+            costume = getLocalVariable(costumeTag) || "Regular Outfit";
+        } 
+        else if (charName === "Blake & Serra" && costumeTag === "O3") {
+            costume = "Festival";
+        } 
+        else if (NSFW) {
+            switch (costumeTag) {
+                case "LG": {
+                    const lounge = ["Bastet", "Nefara", "Khepri", "Shani"].includes(charName);
+                    if (charName === "Muse") {
+                        costume = "Naked";
+                    } else {
+                        costume = lounge ? "Lounge" : "Lingerie";
+                    }
+                    break;
+                }
+                case "NK":
+                    costume = "Naked";
+                    break;
+            }
+        }
+        
+        if (charName === "Ṇ̶̰̼͘a̶͍̅́̒r̵̓̏̉̈́ā̸͒̔̄") {
+            costume = `${getGlobalVariable("NaraCommunity") || ""}${costume}`;
+        }
+        
+        return costume;
+    } catch {
+        return costume;
     }
 }
 
