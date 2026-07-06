@@ -873,12 +873,6 @@ Expressive Willow <br>
                     }
                     break;
                 }
-                case "Muse": {
-                    const result = await doPopup({result: true, okButton: "Turbo Mode", cancelButton: "Standard"}, "Standard is the recommended route for Muse, however, you can turn on Turbo mode for significantly extra sexual Muse.")
-                    setLocalVariable("TurboMuse", result ? "true" : "false");
-                    await quickReplyApi.executeQuickReply("Weyland","XXX");
-                    break;
-                }
                 case "Kris": {
                     const result = await doPopup({result: true, okButton: "Hard Mode", cancelButton: "Standard"}, `Standard Kris and Hard Mode Kris contain functionally the same bot.
 However, Hard Mode Kris essentially has a voice in his head demanding he not hold back, and be more of an asshole.<br><br>
