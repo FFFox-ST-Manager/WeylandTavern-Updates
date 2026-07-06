@@ -332,7 +332,7 @@ async function OnSwipe(messageID) {
         const newSwipe = charMessage?.swipe_id === undefined || !charMessage?.swipes?.length === undefined ? true : charMessage.swipe_id >= charMessage.swipes.length
 
         if (charName && !newSwipe) {
-            if (charName === "Cerberus Sisters" && messageID === 0) {
+            if (charName === "Cerberus Sisters" && messageID === 0 && charMessage.swipe_id < 4) {
                 setLocalVariable("CerberusSister", ["Fawne", "Neshe", "Astrid"][charMessage.swipe_id])
             }
             await CostumeChangeBot(charMessage);
