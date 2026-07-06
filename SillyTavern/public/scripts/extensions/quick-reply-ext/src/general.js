@@ -1,5 +1,5 @@
 import { Fuse } from "../../../../lib.js";
-import { characters, main_api, printCharacters, saveSettingsDebounced, this_chid } from "../../../../script.js";
+import { characters, main_api, printCharacters, saveSettings, saveSettingsDebounced, this_chid } from "../../../../script.js";
 import { background_settings } from "../../../backgrounds.js";
 import { extension_settings } from "../../../extensions.js";
 import { DEFAULT_FILTER_STATE } from "../../../filters.js";
@@ -80,7 +80,6 @@ export function getCurrentCharacterWorldbook() {
 export function getCharacterCostumeFromText(charText, charName="", allowExtra) {
     let costume = "Regular Outfit";
     try {
-        allowExtra = allowExtra ?? getGlobalVariable("PPP1") === "true";
         if (!charText) return "Regular Outfit";
         const textLength = charText.length;
         if (textLength > 50) {
@@ -89,11 +88,12 @@ export function getCharacterCostumeFromText(charText, charName="", allowExtra) {
         const costumeTag = [...charText.matchAll(/\] ?\[(\w+?)\]/g).map(m => m[1])].reverse()[0];
         const extraTag = /O\d/.test(costumeTag);
         const NSFW = getGlobalVariable("NSFW") === "false";
+        allowExtra = (allowExtra ?? getGlobalVariable("PPP1") === "true") 
+        || [ // List of characters that will always load extra costumes
+            "BlakeSerra",
+        ].includes(charName);
         if (allowExtra && extraTag) {
             costume = getLocalVariable(costumeTag) || "Regular Outfit";
-        } 
-        else if (charName === "Blake & Serra" && costumeTag === "O3") {
-            costume = "Festival";
         } 
         else if (NSFW) {
             switch (costumeTag) {
@@ -518,7 +518,7 @@ export function getSpriteFolderName(characterName, costume) {
  */
 export async function setExpression(expression, characterName) {
     // @ts-ignore
-    await sendExpressionCall(getSpriteFolderName(characterName), expression.toLowerCase());
+    await sendExpressionCall(getSpriteFolderName(characterName || getLocalVariable("CostmSave")?.split("/")?.[0]), expression.toLowerCase());
 }
 
 /**
@@ -528,7 +528,7 @@ export async function setExpression(expression, characterName) {
  * @returns 
  */
 export async function setCostumeAndExpression(characterName, costume, expression) {
-    expression = expression ?? getLocalVariable("ExpSave") ?? "neutral";
+    expression = expression || getLocalVariable("ExpSave") || "neutral";
     if (!expression) return;
     await setCostume(`${characterName}/${costume}`);
     // @ts-ignore
@@ -564,14 +564,14 @@ export async function setCostume(folder) {
  * @param {string} [characterName]
  */
 async function ExpressionOverride(characterName) {
-    if (!characterName) characterName = getCurrentCharacterName();
+    characterName = characterName || getCurrentCharacterName();
     if (!characterName) return;
-    const avatarFileName = getCharaFilename(characterName ? getCharacterID(characterName) : this_chid);
+    const avatarFileName = getCharaFilename(getCharacterID(characterName));
+    console.log(`[WQR] avatarFileName: ${avatarFileName}`);
 
     // If the avatar name couldn't be found, abort.
     if (!avatarFileName) {
         console.debug(`Could not find filename for character with name ${characterName}`);
-
         return;
     }
 
@@ -604,5 +604,5 @@ async function ExpressionOverride(characterName) {
         console.debug(`Added/edited expression override for character with filename ${avatarFileName} to folder ${overridePath}`);
     }
 
-    saveSettingsDebounced();
+    await saveSettings();
 }
