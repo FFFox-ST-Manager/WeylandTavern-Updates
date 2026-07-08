@@ -627,6 +627,11 @@ async function Expressions(charName, charMessage, disableSetting=false) {
 async function SideCharacters(charName, charMessage) {
     const PerformanceStart = performance.now();
     try {
+        if (isMobile() && getLocalVariable("CostmSaveSide") !== "") {
+            setLocalVariable("CostmSaveSide", "");
+            updateSideCharacter({clear: 'true'});
+            DebugLog(`SideCharacters: Cleared side-character from mobile browser.`);
+        }
         if (isMobile() || getGlobalVariable("AutoCostume") === "No") return "Aborted";
         if (charMessage === undefined) charMessage = getLastMessage("char");
         if (charMessage === undefined) return "charMessage missing";
