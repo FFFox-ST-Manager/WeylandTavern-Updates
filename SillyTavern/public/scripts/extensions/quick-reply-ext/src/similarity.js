@@ -1,6 +1,6 @@
 import { substituteParams } from "../../../../script.js";
 
-export class SimilarityFinder {
+class SimilarityFinder {
     constructor(text = "", options = {}) {
         this.options = {
             minRunLength: 3,
@@ -270,7 +270,7 @@ export class SimilarityFinder {
 
 }
 
-export class Detector {
+class Detector {
     /**
      * @param {Record<string, string | {text: string, options?: object}>} targets
      * @param {object} defaultOptions - shared SimilarityFinder options, per-target options merge on top
@@ -342,3 +342,5 @@ export class Detector {
         };
     }
 }
+
+export const detector = new Detector({per: "", des: "", teg: "", pos: ""});

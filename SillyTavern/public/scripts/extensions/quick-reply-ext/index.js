@@ -18,10 +18,9 @@ import strings from "./src/strings.js";
 import { scenarios, tails } from "./src/scenarios.js";
 import { charPer, specialChar } from "./src/charper.js";
 import { ravs } from "./src/rav.js";
-import { Detector } from "./src/similarity.js";
+import { detector } from "./src/similarity.js";
 
 const debug = true;
-const detector = new Detector({per: "", des: "", teg: "", pos: ""});
 
 /**
  * Debug Logs
