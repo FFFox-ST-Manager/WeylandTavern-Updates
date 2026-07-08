@@ -1,25 +1,11 @@
 // =====================================================================
 // Weyland-LTM — Long-Term Memory manager (v1.3.2)
 // =====================================================================
-// Full-JS replacement for the STscript LTM pipeline (Sleep / LTMPrompt /
-// LTMDisabler / MemorySaver). Async draft generation, editable draft
-// window (with a dedicated editable title field), reroll (regenerates from
+// Full-JS replacement for the STscript LTM pipeline. 
+// Async draft generation, editable draft window, reroll (regenerates from
 // source when known, otherwise rewrites), pin, merge, bulk-select delete,
 // version history, backward-compat ingest of entries created by the old
 // system.
-//
-// Generation goes through ChatCompletionService (raw API call) rather
-// than the chat Generate() pipeline, so:
-//   - Weyland-Router's interceptor never fires on LTM calls (no pause
-//     dance needed)
-//   - streaming works into our own editor even when chat streaming is
-//     globally disabled
-//   - a per-call model override never touches the user's settings
-//
-// See README.md for the full architecture writeup (prompt structure,
-// storage format, the character-card POV tag convention) and
-// USER_GUIDE.md for the plain-language version to hand to end users.
-// =====================================================================
 
 import {
     loadWorldInfo,
@@ -362,14 +348,6 @@ function recordLTMCoverage(lastMessageId) {
 // =====================================================================
 // Every prompt builder below returns a MESSAGE ARRAY, not a single string,
 // structured as a sandwich:
-//   1. system  — the ruleset (who, format, anti-hallucination, date handling)
-//   2. user    — the raw material (chat excerpt / existing entries)
-//   3. user    — a short, high-recency reminder sent LAST, right before
-//      generation, explicitly telling the model to stop roleplaying and
-//      produce the entry now. Models weight the most recent turn heaviest,
-//      so this is where "don't just think and then stop" belongs — burying
-//      it up in the system message with everything else was letting models
-//      wander off after a long <think> block and never actually answer.
 
 const THINKING_DISCIPLINE = `Keep any <think></think> reasoning SHORT — a handful of terse bullet points, not an essay. The instant you close </think>, continue in that SAME response with the actual output. Stopping after only the thinking block is a failure — you are not done until [END MEMORY ENTRY] (or the equivalent closing marker) has been written.`;
 
@@ -538,8 +516,6 @@ function stripThinkBlocks(text) {
     return String(text || '')
         .replace(/<think>[\s\S]*?<\/think>/gi, '')
         .replace(/<thinking>[\s\S]*?<\/thinking>/gi, '')
-        // Unclosed think block (mid-stream): hide everything from the tag on,
-        // so reasoning never flashes in the editor while streaming.
         .replace(/<think(?:ing)?>[\s\S]*$/i, '')
         .trim();
 }
@@ -600,13 +576,6 @@ function extractDateFromDraft(text) {
     return m ? m[1].trim() : '';
 }
 
-/**
- * Safety net for entries saved during v1.1.0's brief window where the model
- * was (wrongly) told to write literal {{char}}/{{user}} tokens into its
- * output. Resolves any that slipped through so old saved entries don't show
- * broken placeholder text in the sidebar/editor — harmless no-op on entries
- * that never had the bug (real names pass through unchanged).
- */
 function displayName(text) {
     return String(text || '')
         .replace(/\{\{char\}\}/gi, getCurrentCharacterName())
@@ -752,12 +721,6 @@ function getChatBookNameIfExists() {
 }
 
 // Backward-compat detection for entries created by the old STscript pipeline
-// (Sleep/LTMPrompt), which tagged entries with a plain numeric automationId
-// (its own internal counter) rather than our "ltm:<uuid>" marker. A numeric
-// ID alone isn't proof — plenty of unrelated WI entries could have a numeric
-// automationId for other reasons — so it's only trusted as legacy-LTM if the
-// content/comment ALSO looks like a memory entry. This is how old users' pre-
-// existing memories get picked up by the new panel with zero migration step.
 function entryLooksLikeLTM(entry) {
     const autoId = String(entry.automationId ?? '');
     if (autoId.startsWith(LTM_MARKER_PREFIX)) return true;

@@ -2,18 +2,17 @@ import { quickReplyApi } from "../quick-reply/index.js";
 import { executeSlashCommandsWithOptions } from "../../slash-commands.js";
 
 import { getGlobalVariable, getLocalVariable } from "../../variables.js";
-import { chat, doNewChat, eventSource, event_types, extractMessageBias, sendMessageAsUser, substituteParams } from "../../../script.js";
+import { chat, doNewChat, eventSource, event_types } from "../../../script.js";
 import { selected_world_info, onWorldInfoChange } from "../../world-info.js";
-import { oai_settings } from "../../openai.js";
 import { isMobile } from "../../RossAscends-mods.js";
 import { setPersonaLockState } from "../../personas.js";
 import { updateSideCharacter } from "../Side-Character-Loader/index.js";
 
 import { getRandomInt, getCurrentCharacterName, getCurrentUserName, setLLModel, setBackground, tagExists, tagAdd, tagRemove, getPersonaBook, getCurrentCharacterWorldbook, setCostume, setExpression, setCostumeAndExpression, getCharacterCostumeFromText, getCurrentCharacterVersion, getCurrentCharacterPersonality, getCurrentCharacterDescription } from "./src/general.js";
 import { deleteGlobalVariable, deleteLocalVariable, deleteLocalVariables, flushInject, inject, setGlobalVariable, setLocalVariable } from "./src/variables.js"
-import { findLoreBookEntry, getCurrentChatbook, getEntryField, setEntryField } from "./src/lorebook.js";
-import { doButtons, doInput, doPopup } from "./src/popups.js";
-import { closeChat, editSwipe, getFirstMessage, getLastMessage, getMessages, hideMessages, unhideMessages } from "./src/chat.js";
+import { findLoreBookEntry, getEntryField, setEntryField } from "./src/lorebook.js";
+import { doButtons, doPopup } from "./src/popups.js";
+import { closeChat, editSwipe, getFirstMessage, getLastMessage, unhideMessages } from "./src/chat.js";
 import strings from "./src/strings.js";
 import { scenarios, tails } from "./src/scenarios.js";
 import { charPer, specialChar } from "./src/charper.js";
@@ -39,7 +38,6 @@ function DebugLog(message, object=undefined) {
 // Non-Persistent checks, use sparingly
 const checks = {
     skipChatChange: false,
-    skipLTMCounter: false,
     lastChatID: ""
 };
 
@@ -168,15 +166,6 @@ async function OnUser(messageID) {
                 setGlobalVariable("Must1st", "true");
             }
 
-            // LTM Counter Script
-            if (!checks?.skipLTMCounter) {
-                const LTMCounterStart = performance.now();
-                await LTMCounter(messageID, userName);
-                DebugLog(`[P] LTMCounter: ${(performance.now() - LTMCounterStart).toFixed(4)}ms`);
-            } else {
-                checks.skipLTMCounter = false;
-            }
-
             setLocalVariable("lastUserMessID", currentUserMessID); // Update lastUserMessID to check if message has changed next call
         } else {
             DebugLog(`UserMessageID: ${currentUserMessID} === ${getLocalVariable("lastUserMessID")}`);
@@ -219,11 +208,6 @@ async function OnAi(messageID) {
             } else {
                 setLocalVariable("AnalysisLayer", strings.NorAnalysis);
             }
-
-            // MemorySaver Script
-            const MemorySaverStart = performance.now();
-            await quickReplyApi.executeQuickReply("Weyland","MemorySaver");
-            DebugLog(`[P] MemorySaver: ${(performance.now() - MemorySaverStart).toFixed(4)}ms`);
 
             // AngelDevil Script
             AngelDevil();
@@ -307,7 +291,6 @@ async function OnAi(messageID) {
                 setLocalVariable("DieRoll", getRandomInt(3, 8));
             }
 
-            // Clear Script
             await Clear();
 
             setLocalVariable("lastMessID", currentMessID); // Update lastMessID to check if message has changed next call
@@ -455,9 +438,7 @@ async function AutoStart(charName) {
                 await quickReplyApi.executeQuickReply("WeylandUni", "MirrorStart");
             }
             AutoCostumes(charName);
-            if (charName === "Kressa") {
-                setLocalVariable("ravteg", strings.ravtegKres);
-            } else if (/Kinsbane Manor|Muse|Aethel/.test(charName)) {
+            if (/Kinsbane Manor|Muse|Aethel|Kressa/.test(charName)) {
                 await SpecialChar(charName);
             }
         }
@@ -727,139 +708,6 @@ async function AutoBG(charMessage) {
         }
     } catch (err) {
         console.error(`[WQR] AutoBG Error:`, err);
-        return `Error`
-    }
-}
-
-/**
- * LTM Counter Script
- * OnUser
- * @param {number} messageID
- * @param {string} userName
- * @returns {Promise<string | undefined>}
- */
-async function LTMCounter(messageID, userName) {
-    if (!messageID) return "Aborted";
-    const PerformanceStart = performance.now();
-    try {
-        const characterName = getCurrentCharacterName();
-        if (!characterName) return "{{char}} undefined";
-        if (!userName) userName = getCurrentUserName();
-        setLocalVariable("LTMLorebook", "Weyland");
-        if (getLocalVariable("LTMGoal") === "") {
-            let LTMGoal = 999999;
-            const LTMMessages = getGlobalVariable("LTMMessages");
-            if (LTMMessages) {
-                const LTMCounter = getLocalVariable("LTMCounter");
-                if (LTMCounter !== "") {
-                    if (LTMCounter) LTMGoal = ((LTMCounter * 2) - LTMMessages) + messageID;
-                } else {
-                    LTMGoal = LTMMessages - 1;
-                }
-            }
-            setLocalVariable("LTMGoal", LTMGoal);
-        }
-        deleteLocalVariable("genOutput");
-        if (getLocalVariable("LTMSave") !== "No") {
-            const LTMGoal = getLocalVariable("LTMGoal");
-            if (messageID >= LTMGoal) {
-                const choice = await doButtons({labels: "[\"Create LTM\",\"Snooze LTM for 1 User Message\",\"Snooze LTM for x Messages\",\"Disable LTMs\"]"}, `LTM Preparing to be created.<br><br>Is now a good time for an LTM, or do you wish to snooze it?`) || "Create LTM";
-                setLocalVariable("SnoozeOptions", choice);
-                if (choice === "Create LTM") {
-                    const chatbookName = await getCurrentChatbook();
-                    const LTMMessages = getGlobalVariable("LTMMessages");
-                    setLocalVariable("LTMGoal", LTMGoal + LTMMessages);
-                    setLocalVariable("ChatLore", chatbookName);
-                    setLocalVariable("POVMemorySet", "1st");
-                    if (/Weybot|Kinsbane Manor|Blake & Serra|Lyris & Vesper|Hannah & Summer|Mirror Weyland/.test(characterName)) {
-                        setLocalVariable("POVMemorySet", "3rd");
-                    }
-                    if (characterName === "Cerberus Sisters") {
-                        if (getLocalVariable("CerberusSister") === "") {
-                            await quickReplyApi.executeQuickReply("Weyland","4Scenarios4");
-                        }
-                        setLocalVariable("POVMemorySet", "3rd");
-                    }
-                    if (getLocalVariable("POVMemorySet") === "3rd") {
-                        setLocalVariable("MemoryPOV", "A third-person POV recounting / concise summary of ALL events in third-person");
-                    } else {
-                        setLocalVariable("MemoryPOV", `${characterName}'s personal recounting / concise summary of ALL events in first-person`);
-                    }
-                    if (/Fawne|Neshe/.test(characterName)) {
-                        setLocalVariable("MemoryPOV", `A 1st person concise summary of ALL events so far solely from ${characterName}'s pov only.`);
-                    }
-                    toastr.info(`Creating LTM Entry in ${chatbookName}`)
-                    const LTMModelSave = getGlobalVariable("LTMModelSave");
-                    if (LTMModelSave !== "" &&
-                        oai_settings?.custom_url === "https://helixmind.online/v1" &&
-                        oai_settings?.custom_model !== LTMModelSave
-                    ) {
-                        setGlobalVariable("ModelSwitched", oai_settings.custom_model);
-                        await setLLModel(LTMModelSave);
-                    }
-                    setLocalVariable("EntryNumber", getLocalVariable("EntryNumber") + 1);
-                    setLocalVariable("ChatCount", messageID - LTMMessages);
-                    if (getLocalVariable("ChatCount") <= 0) {
-                        setLocalVariable("ChatCount", 0)
-                    }
-                    const messages = getMessages({names: true}, {start: getLocalVariable("ChatCount"), end: messageID});
-                    setLocalVariable("ChatHistory", messages);
-                    setLocalVariable("LastMessageTest", getLastMessage("char")?.mes);
-                    setLocalVariable("LTMHider", messageID - (LTMMessages+2));
-                    if (getLocalVariable("EntryNumber") > 1) {
-                        setLocalVariable("LTMDisabler", "true");
-                        await quickReplyApi.executeQuickReply("Weyland","LTMDisabler");
-                    }
-                    setLocalVariable("LTMRav", "true");
-                    await XXX();
-                    const LTMHider = getLocalVariable("LTMHider");
-                    if (LTMHider >= 1) {
-                        await hideMessages({start: 0, end: LTMHider});
-                    }
-                    const scenarioUID = await findLoreBookEntry("Weyland Characters", "automationId", "Scenario");
-                    await setEntryField({file: "Weyland Characters", uid: scenarioUID, field: "disable"}, true);
-                    const constantScenarioUID = await findLoreBookEntry("Weyland Characters", "comment", "Constant Scenario");
-                    await setEntryField({file: "Weyland Characters", uid: constantScenarioUID, field: "disable"}, true);
-                    await hideMessages({start: messageID}, userName);
-                    onWorldInfoChange({ state: 'off', silent: 'true' }, 'Weyland');
-                    deleteLocalVariables(["ravteg","postrav","ravtegKinsB","postravKinsB","ravtegNek0","ravtegMu3e","PostMuse"]);
-                    if (characterName === "Kris") {
-                        setLocalVariable("temprav", getLocalVariable("Krisrav"));
-                        deleteLocalVariable("Krisrav");
-                    }
-                    deleteGlobalVariable("Thinking");
-                    checks.skipLTMCounter = true;
-                    await sendMessageAsUser(strings.ltmp, extractMessageBias(strings.ltmp), undefined, false, "LTM Creation in Process...");
-                    setLocalVariable("MIP", "true");
-                } else {
-                    switch (choice) {
-                        case "Disable LTMs":
-                            setLocalVariable("LTMSave", "No");
-                            break;
-                        case "Snooze LTM for x Messages":
-                            const result = await doInput({default: "1", okButton: "Snooze LTM How many user messages do you wish to snooze the next LTM for?"})
-                            setLocalVariable("SnoozeAmount", result || "1");
-                            toastr.info(`I'm feeling sleepy, ${userName}.`)
-                            toastr.info(`But don't worry. I'll stay awake another few messages for you.`)
-                            setLocalVariable("LTMGoal", getLocalVariable("LTMGoal") + (getLocalVariable("SnoozeAmount")*2))
-                            break;
-                        case "Snooze LTM for 1 User Message":
-                        default:
-                            toastr.info(`I'm feeling sleepy, ${userName}.`)
-                            toastr.info(`But don't worry. I'll stay awake another message for you.`)
-                            setLocalVariable("LTMGoal", getLocalVariable("LTMGoal") + 2);
-                            break;
-                    }
-                }
-            } else {
-                if (messageID >= (getLocalVariable("LTMGoal") - 1)) {
-                    toastr.info(`LTM Creation imminent.`)
-                }
-            }
-        }
-        DebugLog(`[P] LTMCounter: ${(performance.now()-PerformanceStart).toFixed(4)}ms`);
-    } catch (error) {
-        console.error(`[WQR] LTMCounter Error:`, error);
         return `Error`
     }
 }
@@ -1266,7 +1114,8 @@ Dated Nix at start of Freshman, but ended getting dumped.`, true);
  * @returns {Promise<string | undefined>}
  * */
 async function CharPer(charName) {
-    if (!charName) charName = getCurrentCharacterName();
+    charName = charName || getCurrentCharacterName();
+    if (!charName) return;
     const PerformanceStart = performance.now();
     try {
         // Special
