@@ -2,24 +2,26 @@ import { quickReplyApi } from "../quick-reply/index.js";
 import { executeSlashCommandsWithOptions } from "../../slash-commands.js";
 
 import { getGlobalVariable, getLocalVariable } from "../../variables.js";
-import { chat, doNewChat, eventSource, event_types, extractMessageBias, sendMessageAsUser} from "../../../script.js";
+import { chat, doNewChat, eventSource, event_types, extractMessageBias, sendMessageAsUser, substituteParams } from "../../../script.js";
 import { selected_world_info, onWorldInfoChange } from "../../world-info.js";
 import { oai_settings } from "../../openai.js";
-import { delay } from "../../utils.js";
 import { isMobile } from "../../RossAscends-mods.js";
 import { setPersonaLockState } from "../../personas.js";
 import { updateSideCharacter } from "../Side-Character-Loader/index.js";
 
-import { getRandomInt, getCurrentCharacterName, getCurrentUserName, setLLModel, setBackground, tagExists, tagAdd, tagRemove, getPersonaBook, getCurrentCharacterWorldbook, setCostume, setExpression, setCostumeAndExpression, getCharacterCostumeFromText } from "./src/general.js";
+import { getRandomInt, getCurrentCharacterName, getCurrentUserName, setLLModel, setBackground, tagExists, tagAdd, tagRemove, getPersonaBook, getCurrentCharacterWorldbook, setCostume, setExpression, setCostumeAndExpression, getCharacterCostumeFromText, getCurrentCharacterVersion, getCurrentCharacterPersonality, getCurrentCharacterDescription } from "./src/general.js";
 import { deleteGlobalVariable, deleteLocalVariable, deleteLocalVariables, flushInject, inject, setGlobalVariable, setLocalVariable } from "./src/variables.js"
 import { findLoreBookEntry, getCurrentChatbook, getEntryField, setEntryField } from "./src/lorebook.js";
 import { doButtons, doInput, doPopup } from "./src/popups.js";
-import { getFirstMessage, getLastMessage, getMessages, hideMessages, unhideMessages } from "./src/chat.js";
+import { closeChat, editSwipe, getFirstMessage, getLastMessage, getMessages, hideMessages, unhideMessages } from "./src/chat.js";
 import strings from "./src/strings.js";
 import { scenarios, tails } from "./src/scenarios.js";
-import { charPer } from "./src/charper.js";
+import { charPer, specialChar } from "./src/charper.js";
+import { ravs } from "./src/rav.js";
+import { Detector } from "./src/similarity.js";
 
-const debug = false;
+const debug = true;
+const detector = new Detector({per: "", des: "", teg: "", pos: ""});
 
 /**
  * Debug Logs
@@ -99,9 +101,7 @@ async function OnUser(messageID) {
             if (getLocalVariable("ScenarioSet") !== "true") {
                 let anyFail = false;
                 if (getLocalVariable("ravteg") === "") {
-                    const AutoSStart = performance.now();
-                    await quickReplyApi.executeQuickReply("Weyland","AutoStart"); // Probably convert this too
-                    DebugLog(`[P] AS: ${(performance.now() - AutoSStart).toFixed(4)}ms`);
+                    await AutoStart();
                 }
 
                 setLocalVariable("newchatstarted", "true");
@@ -144,7 +144,7 @@ async function OnUser(messageID) {
             if (getLocalVariable("MIP") !== "true") {
                 if (getLocalVariable("LTMRav") === "true") {
                     setLocalVariable("LTMRav", "false");
-                    await quickReplyApi.executeQuickReply("Weyland","XXX");
+                    await XXX();
                     onWorldInfoChange({ state: 'on', silent: 'true' }, 'Weyland');
                     if (characterName === "Kris") {
                         setLocalVariable("Krisrav", getLocalVariable("temprav"));
@@ -206,9 +206,9 @@ async function OnAi(messageID) {
 
         if (!charText || !charName) return; // Empty message or invalid sender, scripts below this require those
  
-        const charSwipeID = chatMessage.swipe_id;
+        const charSwipeID = chatMessage?.swipe_id;
 
-        const currentMessID = `${charName}_${messageID}_${charSwipeID}`
+        const currentMessID = `${charName}_${messageID}_${chatMessage?.send_date}_${charSwipeID}`
         const newMessage = currentMessID !== getLocalVariable("lastMessID");
 
         if (newMessage) {
@@ -230,10 +230,10 @@ async function OnAi(messageID) {
             AngelDevil();
 
             // CostumeChangeforBot Script
-            await CostumeChangeBot(chatMessage, charName);
+            CostumeChangeBot(chatMessage, charName);
 
             // AutoBG Script
-            await AutoBG(chatMessage);
+            AutoBG(chatMessage);
 
             // Cleanup ContextTimer
             if (getLocalVariable("ConstantContext") !== "" && messageID >= getLocalVariable("ContextTimer")) {
@@ -354,10 +354,12 @@ async function OnChatChanged(chatbookName) {
             checks.skipChatChange = false;
             return;
         }
+        await quickReplyApi.executeQuickReply("Weyland","~");
+        await quickReplyApi.executeQuickReply("Weyland","ExtCheck");
         if (checks.lastChatID !== chatbookName) {
             await quickReplyApi.executeQuickReply("Weyland", "Descr");
             await quickReplyApi.executeQuickReply("Weyland", "PP&PPPLimiters");
-            if (chatbookName.includes("Rosa") && chat.length === 1 && chat[0].swipe_id === 0) {
+            if (chatbookName?.includes("Rosa") && chat.length === 1 && chat[0].swipe_id === 0) {
                 setLocalVariable("CostmSave", "Rosa/Intro");
                 await setCostume("Rosa/Intro");
             }
@@ -390,6 +392,90 @@ async function OnNewChat(args) {
 
 // SCRIPTS
 //#region
+/**
+ * @param {string} [charName]
+ */
+async function AutoStart(charName) {
+    const PerformanceStart = performance.now();
+    try {
+        const charVer = getCurrentCharacterVersion();
+        if (!charVer) throw new Error("No character version");
+        const qrVer = getGlobalVariable("QRVersion");
+        if ((typeof qrVer === 'string' ? parseInt(qrVer) : qrVer) >= charVer) {
+            if (getLocalVariable("Run") === "true") return;
+            charName = charName || getCurrentCharacterName();
+            if (!charName) return;
+            const isMirrorWeyland = charName === "Mirror Weyland";
+            if (isMirrorWeyland) setLocalVariable("MirrorBegun", "");
+            setLocalVariable("Run", "true");
+            setLocalVariable("StartingYear", "false");
+            setLocalVariable("ExpHid", "true");
+            setLocalVariable("LocalNarrator", getGlobalVariable("Narrator"));
+            setLocalVariable("PhoneCom", isMirrorWeyland ? getGlobalVariable("CommandPhone") : getGlobalVariable("PhoneCommand"));
+            if (charName === "Weybot") {
+                await quickReplyApi.executeQuickReply("Weyland", "WeybotStart");
+            }
+            if (fCheck() && charName === "Kressa") {
+                await setCostume("Kressa/Lounge");
+            }
+            if (!/Kinsbane Manor|Weybot|Kressa/.test(charName) && getLocalVariable("POVType") === "1st") {
+                setGlobalVariable("MessageModeSet", "true");
+                inject({id: "MM", position: "chat", depth: "0"}, strings.firstpov);
+            }
+            if (getCurrentCharacterWorldbook() === "Weyland Characters") {
+                switch (charName) {
+                    case "Aiko": {
+                        const OutfitCodesUID = await findLoreBookEntry("Aiko's Manor", "comment", `Aiko Outfit Codes`);
+                        const content = await getEntryField("Aiko's Manor", OutfitCodesUID);
+                        setLocalVariable("ClothingCodeP", content);
+                        break;
+                    }
+                    case "Muse": {
+                        const OutfitCodesUID = await findLoreBookEntry("Muse Experiment", "comment", `Muse Outfit Codes`);
+                        const content = await getEntryField("Muse Experiment", OutfitCodesUID);
+                        setLocalVariable("ClothingCodeP", content);
+                        break;
+                    }
+                    default:
+                        setLocalVariable("ClothingCodeP", "===");
+                        break;
+                }
+            }
+            setLocalVariable("ravgte", strings.ravgte);
+            setLocalVariable("OrderNumber", "1000");
+            if (!getGlobalVariable("LTMHowMany")) setGlobalVariable("LTMHowMany", "10");
+            if (!getGlobalVariable("LTMMessages")) setGlobalVariable("LTMMessages", "50");
+            if (!getGlobalVariable("LTMTokens")) setGlobalVariable("LTMTokens", "300");
+            setLocalVariable("NewGroup", charName);
+            setLocalVariable("AddChar", charName);
+            setLocalVariable("GroupWarning", "0");
+            setLocalVariable("Warning", strings.warning);
+            await quickReplyApi.executeQuickReply("Weyland", "Descr");
+            await XXX();
+            setLocalVariable("PostRavMem", getLocalVariable("postrav"));
+            setLocalVariable("PostRavCount", "0");
+            if (isMirrorWeyland) {
+                await quickReplyApi.executeQuickReply("WeylandUni", "MirrorStart");
+            }
+            AutoCostumes(charName);
+            if (charName === "Kressa") {
+                setLocalVariable("ravteg", strings.ravtegKres);
+            } else if (/Kinsbane Manor|Muse|Aethel/.test(charName)) {
+                await SpecialChar(charName);
+            }
+        }
+        DebugLog(`[P] AutoStart: ${(performance.now() - PerformanceStart).toFixed(4)}ms`);
+    } catch (error) {
+        console.error(`[WQR] AutoStart Error:`, error);
+        if (fCheck()) {
+            toastr.info(`Character Crashing. Update WTVersion.`);
+        } else {
+            toastr.info(`You need to update your WeylandTavern version to use this character.`);
+            closeChat();
+        }
+    }
+}
+
 /**
  * TitleBarColors Script
  * OnChatChanged
@@ -441,7 +527,7 @@ async function TitleBarColors() {
                 setLocalVariable("LocalNarrator", getGlobalVariable("Narrator"));
                 
             }
-            await quickReplyApi.executeQuickReply("Weyland", "XXX");
+            await XXX();
         }
         const costumeSave = getLocalVariable("CostmSave").split("/");
         if (costumeSave?.length > 1) {
@@ -477,7 +563,7 @@ async function TitleBarColors() {
             setLocalVariable("PhoneCom", getGlobalVariable("CommandPhone"));
             if (getLocalVariable("MirrorBegun") === "") {
                 setLocalVariable("MirrorBegun", "true");
-                await quickReplyApi.executeQuickReply("Weyland","AutoStart");
+                await AutoStart();
             } else {
                 if (getLocalVariable("ConstantScenario") === "") {
                     await Scenarios();
@@ -612,7 +698,7 @@ async function SideCharacters(charName, charMessage) {
             updateSideCharacter({character: spriteFolder, expression: getLocalVariable("ExpSave")}).then(result => {
             if (result) DebugLog(`SideCharacters: Update:`, result);
             }).catch(err => {
-                console.log(`[WQR] SideCharacters Error:`, err);
+                console.error(`[WQR] SideCharacters Error:`, err);
             });
         }
         DebugLog(`[P] SideCharacters: ${(performance.now() - PerformanceStart).toFixed(4)}ms`)
@@ -642,7 +728,6 @@ async function AutoBG(charMessage) {
                 setLocalVariable("PhoneBG", "false");
             }
         }
-        DebugLog(`[P] AutoBG: ${(performance.now()-PerformanceStart).toFixed(4)}ms`);
     } catch (err) {
         console.error(`[WQR] AutoBG Error:`, err);
         return `Error`
@@ -729,7 +814,7 @@ async function LTMCounter(messageID, userName) {
                         await quickReplyApi.executeQuickReply("Weyland","LTMDisabler");
                     }
                     setLocalVariable("LTMRav", "true");
-                    await quickReplyApi.executeQuickReply("Weyland","XXX");
+                    await XXX();
                     const LTMHider = getLocalVariable("LTMHider");
                     if (LTMHider >= 1) {
                         await hideMessages({start: 0, end: LTMHider});
@@ -931,7 +1016,7 @@ This is our sort of rough approach of forcing down the LLM Niceness barrier with
         setLocalVariable("AnalysisLayer", strings.NorAnalysis);
 
         if (getLocalVariable("SpecialThoughts") === "true") {
-            await quickReplyApi.executeQuickReply("Weyland", "XXX");
+            await XXX();
         }
 
         DebugLog(`[P] Scenario: ${(performance.now() - (PerformanceStart-waitDeduction)).toFixed(4)}ms`);
@@ -954,7 +1039,6 @@ async function RosterSB(charName) {
         let earlyStart = getLocalVariable("EarlyStart") === "true";
         const mcyIsFreshman = getLocalVariable("MCY") === "Freshman";
         const startingMonth = getLocalVariable("StartingMonth");
-        const wtCreatorIsFFFox = getGlobalVariable("WTCreator") === "FFFox";
 
         if (charName === "Mirror Weyland") {
             await quickReplyApi.executeQuickReply("WeylandUni", "Mirror");
@@ -1005,7 +1089,7 @@ Room 313: Sofya & NPC`, true);
         setLocalVariable("RT", strings.rsbRT, true);
         setLocalVariable("WTavern", strings.rsbWTavern, true);
         setLocalVariable("KinsbaneLoc", "[KINSBANE MANOR] Potential Location: The Kinsbane Manor\nOnce-grand Victorian mansion that now stands as a testament to neglect and time's relentless march. The manor has long since been abandoned, though rumors surround the place of it possibly being haunted. Most will not approach the mansion unless on a dare. Aiko lives here alone. [END KINSBANE MANOR]\n-----", true);
-        if (wtCreatorIsFFFox) {
+        if (fCheck()) {
             setLocalVariable("crush", "Has a crush on {{user}}.", true);
         }
         if (dumpingBlake) {
@@ -1050,7 +1134,7 @@ Room 313: Sofya & NPC`, true);
         }
         setLocalVariable("JE", strings.rsbJE, true);
         setLocalVariable("KA", strings.rsbKA, true);
-        if (wtCreatorIsFFFox) {
+        if (fCheck()) {
             setLocalVariable("KarmenSuc", strings.rsbKarmenSuc, true);
         }
         setLocalVariable("KM", strings.rsbKM, true);
@@ -1228,7 +1312,7 @@ async function CharPer(charName) {
                 }
                 break;
             case "Hannah":
-                if (getGlobalVariable("WTCreator") === "FFFox") {
+                if (fCheck()) {
                     setLocalVariable("HannahV", "She is still a virgin.");
                 } else {
                     deleteLocalVariable("HannahV");
@@ -1311,7 +1395,7 @@ async function Relationships(){
         setLocalVariable("ConstantScenario", constantScenario);
         DebugLog(`[P] Relationships: ${(performance.now()-PerformanceStart).toFixed(4)}ms`);
     } catch (error) {
-        console.log(`[WQR] Relationships Error:`, error);
+        console.error(`[WQR] Relationships Error:`, error);
     }
 }
 
@@ -1345,7 +1429,7 @@ async function CostumeChangeBot(charMessage, charName) {
         }
         DebugLog(`[P] CostumeChangeBot: ${(performance.now() - PerformanceStart).toFixed(4)}ms`);
     } catch (error) {
-        console.log(`[WQR] CostumeChangeBot Error:`, error);
+        console.error(`[WQR] CostumeChangeBot Error:`, error);
         return "Error";
     }
 }
@@ -1358,7 +1442,7 @@ async function AngelDevil() {
         setLocalVariable("Angel", angels ? strings.goodConcience[ Math.floor(Math.random() * angels)] || "" : "");
         setLocalVariable("Devil", devils ? strings.badConcience[Math.floor(Math.random() * devils)] || "" : "");
     } catch (error) {
-        console.log(`[WQR] AngelDevil Error:`, error);
+        console.error(`[WQR] AngelDevil Error:`, error);
     }
 }
 //#endregion
@@ -1584,7 +1668,7 @@ async function BG(charMessage, charName) {
                     // No Kinsbane-specific match — fall through to general resolution.
                 }
 
-                if (getGlobalVariable("WTCreator") === "FFFox") {
+                if (fCheck()) {
                     await quickReplyApi.executeQuickReply("FFFox Greetings", "BG");
                     return;
                 }
@@ -2071,7 +2155,7 @@ async function OpenWorldCostumes(charName, charMessage) {
         }
         DebugLog(`[P] OpenWorldCostumes: ${(performance.now() - PerformanceStart).toFixed(4)}ms`);
     } catch (error) {
-        console.log(`[WQR] OpenWorldCostumes Error:`, error);
+        console.error(`[WQR] OpenWorldCostumes Error:`, error);
     }
 }
 
@@ -2124,7 +2208,7 @@ async function GroupCostumes(charName, charMessage) {
         }
         DebugLog(`[P] GroupCostumes: ${(performance.now() - PerformanceStart).toFixed(4)}ms`);
     } catch (error) {
-        console.log(`[WQR] GroupCostumes Error:`, error);
+        console.error(`[WQR] GroupCostumes Error:`, error);
     }
 }
 
@@ -2161,7 +2245,7 @@ async function AutoCostumes(charName, charMessage) {
         }
         DebugLog(`[P] AutoCostumes: ${(performance.now() - PerformanceStart).toFixed(4)}ms`);
     } catch (error) {
-        console.log(`[WQR] AutoCostumes Error:`, error);
+        console.error(`[WQR] AutoCostumes Error:`, error);
     }
 }
 
@@ -2318,6 +2402,131 @@ async function SetSchoolYear() {
         return "Error"
     }
 }
+
+/**
+ * @param {string} [charName]
+ * @returns 
+ */
+async function SpecialChar(charName) {
+    const PerformanceStart = performance.now();
+    try {
+        charName = charName || getCurrentCharacterName();
+        if (!charName) return;
+        const specialVars = specialChar.get(charName);
+        if (specialVars?.vars) {
+            const keys = Object.keys(specialVars.vars);
+            if (keys.length) {
+                const lastKey = keys[keys.length-1];
+                for (const key of keys) {
+                    DebugLog(`SpecialChar set ${key}`);
+                    setLocalVariable(key, specialVars.vars[key], key !== lastKey);
+                }
+            }
+        }
+        if (specialVars?.booleanVars) {
+            const keys = Object.keys(specialVars.booleanVars);
+            switch (charName) {
+                case "Muse": {
+                    if (keys.includes("PostMuse")) {
+                        // @ts-ignore
+                        setLocalVariable("PostMuse", specialVars.booleanVars["PostMuse"][String(getLocalVariable("MuseTurbo")!=="false").toLowerCase()]);
+                    }
+                }
+            }
+        }
+        const specialVarsKressa = specialChar.get("Kressa");
+        if (specialVarsKressa?.vars) {
+            const keys = Object.keys(specialVarsKressa.vars);
+            if (keys.length) {
+                const lastKey = keys[keys.length-1];
+                for (const key of keys) {
+                    DebugLog(`SpecialChar set ${key}`);
+                    setLocalVariable(key, specialVarsKressa.vars[key], key !== lastKey);
+                }
+            }
+        }
+        DebugLog(`[P] SpecialChar: ${(performance.now() - PerformanceStart).toFixed(4)}ms`);
+    } catch (error) {
+        console.error(`[WQR] SpecialChar Error:`, error);
+    }
+}
+
+/**
+ * @param {string} [charName]
+ * @returns 
+ */
+async function XXX(charName) {
+    const PerformanceStart = performance.now();
+    try {
+        charName = charName || getCurrentCharacterName();
+        if (!charName) return;
+        if (getLocalVariable("RPPOVLocalSet") === "") setLocalVariable("RPPOVLocal", getGlobalVariable("RPPov"));
+        if (/Kinsbane Manor|Aethel|Muse|Kressa/.test(charName)) await SpecialChar();
+        if (getLocalVariable("LocalN") === "") setLocalVariable("LocalNarrator", getGlobalVariable("Narrator"));
+        if (ravs.get(getGlobalVariable("PromptChoice")) === undefined) setGlobalVariable("PromptChoice", "Current Prompt");
+        const pc = getGlobalVariable("PromptChoice");
+        const rav = ravs.get(pc) || ravs.get("Current Prompt");
+        if (!rav) throw new Error("No rav found");
+        if (["Summer","Loona","Vera","Belle","Hannah","Seth","Lentyl","Briar","Willow","Bap","Dash"].includes(charName) && rav.thinkYes) {
+            setLocalVariable("ThoughtSet", rav.thinkYes);
+        } else if (getLocalVariable("SpecialThoughts") && rav.thinkSpec) {
+            setLocalVariable("ThoughtSet", rav.thinkSpec);
+        }
+        switch (pc) {
+            default:
+                setLocalVariable("CCPromptCodes", /Weybot|Mirror Weyland/.test(charName) ? rav.CCPCA : rav.CCPC);
+                setLocalVariable("ravteg", rav.teg);
+                setLocalVariable("postrav", rav.post.replace("{{pipe}}", `${getLocalVariable("ExpAltShow") === "true" ? `${rav.expaltshow}` : "{{getglobalvar::RPFocus}}"}\n${getGlobalVariable("HTML!") === "Enabled" ? rav.whtml : "====="}`));
+                break;
+            case "Old Prompt 2025":
+                let replace = [];
+                if (charName !== "Muse") {
+                    replace.push('');
+                    if (getLocalVariable("LTMRav") !== "true") {
+                        replace.push(charName === "Weybot" ? rav.CCPCA : rav.CCPC);
+                        replace.push(rav.NoMuseNoLTMRav);
+                    } else {
+                        replace.push("Do not use the roleplay header or footer in your memory creation.");
+                    }
+                    replace.push('');
+                }
+                setLocalVariable("ravteg",rav.teg.replace("\n{{pipe}}\n", replace.join("\n")));
+                setLocalVariable("postrav", rav.post);
+                break;
+        }
+        await Clear();
+        DebugLog(`[P] XXX: ${(performance.now() - PerformanceStart).toFixed(4)}ms`);
+    } catch (error) {
+        console.error(`[WQR] XXX Error:`, error);
+    }
+}
+
+/**
+ * @param {import("./src/chat.js").ChatMessage} [charMessage]
+ */
+async function Clear(charMessage) {
+    const PerformanceStart = performance.now();
+    try {
+        charMessage = charMessage || getLastMessage("char");
+        if (!charMessage?.mes) return;
+        detector.updateTarget("teg", getLocalVariable("ravteg"));
+        detector.updateTarget("post", getLocalVariable("postrav"));
+        detector.updateTarget("per", getCurrentCharacterPersonality() || "");
+        detector.updateTarget("des", getCurrentCharacterDescription() || "");
+        const check = detector.check(charMessage.mes, {threshold: 0.375});
+        if (check.tooSimilar) {
+            await editSwipe("");
+            if (debug) console.warn(`[WQR] Too similar "${check.highestRisk}", score ${check.results[check.highestRisk].score}`);
+        }
+        DebugLog(`[P] Clear: ${(performance.now() - PerformanceStart).toFixed(4)}ms`);
+    } catch (error) {
+        console.error(`[WQR] Clear Error:`, error);
+    }
+}
+
+function fCheck() {
+    return getGlobalVariable("WTCreator") === "FFFox";
+}
 //#endregion
 
 // SETUP
@@ -2330,5 +2539,5 @@ async function SetSchoolYear() {
     eventSource.on(event_types.CHAT_CHANGED, OnChatChanged);
     eventSource.on(event_types.CHAT_CREATED, OnNewChat);
     eventSource.on(event_types.MESSAGE_SWIPED, OnSwipe);
-    console.log("[WQR]");
+    DebugLog("Setup");
 })();

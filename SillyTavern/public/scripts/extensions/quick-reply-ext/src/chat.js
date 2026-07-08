@@ -1,4 +1,4 @@
-import { characters, chat, clearChat, deleteCharacterChatByName, getChat, getRequestHeaders, saveCharacterDebounced, this_chid } from "../../../../script.js";
+import { characters, chat, clearChat, deleteCharacterChatByName, getChat, getRequestHeaders, messageFormatting, saveCharacterDebounced, saveChatConditional, saveChatDebounced, this_chid } from "../../../../script.js";
 import { hideChatMessageRange } from "../../../chats.js";
 import { system_message_types } from "../../../system-messages.js";
 import { sortMoments, timestampToMoment } from "../../../utils.js";
@@ -181,6 +181,32 @@ export async function getCharacterChatCount(characterName) {
         console.error(`[WQR] getAllCharacterChats Error:`, error?.message);
     }
     
+}
+
+export function closeChat() {
+    $('#option_close_chat').trigger('click');
+}
+
+/**
+ * @param {string} [text]
+ * @param {number} [messageID]
+ * @param {number} [swipeID]
+ */
+export async function editSwipe(text="", messageID=-1, swipeID) {
+    if (messageID < 0) messageID += chat.length;
+    const mes = chat.at(messageID);
+    mes.mes = text;
+    if (mes.swipes) {
+        mes.swipes[swipeID || (mes.swipe_id ?? 0)] = text;
+    }
+    document.querySelector(`#chat [mesid="${messageID}"] .mes_text`).innerHTML = messageFormatting(
+        text,
+        mes.name,
+        mes.is_system,
+        mes.is_user,
+        messageID,
+    );
+    await saveChatConditional();
 }
 
 // Unused
