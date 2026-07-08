@@ -22,6 +22,7 @@ public/scripts/extensions/third-party/*
 public/stats.json
 /uploads/
 *.jsonl
+*.ignore*
 /config.conf
 /config.yaml
 /config.conf.bak
