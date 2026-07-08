@@ -1,0 +1,535 @@
+/* =====================================================
+   Weyland-LTM — styling
+   Visual language matched to Weyland-Router: crimson accent,
+   dark radial background, subtle inset highlights.
+   ===================================================== */
+
+/* ── KEYFRAMES ─────────────────────────────────────── */
+
+@keyframes wlm-fade-in {
+    from { opacity: 0; transform: translateY(2px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes wlm-pulse-amber {
+    0%, 100% { box-shadow: 0 0 6px rgba(254, 188, 46, 0.4); }
+    50%      { box-shadow: 0 0 14px rgba(254, 188, 46, 0.8); }
+}
+@keyframes wlm-pulse-crimson {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(180, 38, 58, 0.45); }
+    50%      { box-shadow: 0 0 0 5px rgba(180, 38, 58, 0); }
+}
+
+/* ── NOTIFICATION CHIP ─────────────────────────────── */
+
+.wlm-chip {
+    position: fixed;
+    top: 12px;
+    right: 12px;
+    z-index: 99989;
+    padding: 6px 12px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    user-select: none;
+    background: linear-gradient(180deg, rgba(30, 18, 24, 0.98), rgba(18, 10, 16, 0.98));
+    border: 1px solid rgba(180, 38, 58, 0.5);
+    color: #f4e6ea;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    animation: wlm-fade-in 200ms ease-out;
+    transition: transform 100ms ease-out, box-shadow 100ms ease-out;
+}
+.wlm-chip:hover  { transform: translateY(-1px); }
+.wlm-chip-hidden { display: none !important; }
+
+.wlm-chip[data-kind="ready"] { animation: wlm-fade-in 200ms ease-out, wlm-pulse-crimson 2s ease-in-out infinite; }
+.wlm-chip[data-kind="error"] { border-color: rgba(240, 100, 60, 0.7); animation: wlm-fade-in 200ms ease-out, wlm-pulse-amber 2s ease-in-out infinite; }
+.wlm-chip[data-kind="info"]  { opacity: 0.85; }
+.wlm-chip[data-kind="suggest"] { opacity: 0.75; border-style: dashed; }
+
+/* ── MODAL FRAME ───────────────────────────────────── */
+
+#wlm-modal {
+    position: fixed;
+    top: 60px;
+    left: 60px;
+    width: 780px;
+    height: 560px;
+    min-width: 520px;
+    min-height: 360px;
+    max-width: calc(100vw - 24px);
+    max-height: calc(100vh - 24px);
+    resize: both;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    pointer-events: auto;
+    background:
+        radial-gradient(ellipse 80% 60% at 50% 0%, rgba(180, 38, 58, 0.08) 0%, transparent 70%),
+        linear-gradient(180deg, rgba(20, 14, 18, 0.97) 0%, rgba(12, 8, 11, 0.97) 100%);
+    border: 1px solid rgba(180, 38, 58, 0.4);
+    box-shadow:
+        0 24px 64px rgba(0, 0, 0, 0.7),
+        0 0 1px rgba(180, 38, 58, 0.6),
+        inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    border-radius: 8px;
+    color: #f4e6ea;
+    font-family: system-ui, -apple-system, sans-serif;
+}
+
+#wlm-titlebar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 14px;
+    background: linear-gradient(180deg, rgba(28, 16, 22, 0.98), rgba(18, 10, 16, 0.98));
+    border-bottom: 1px solid rgba(180, 38, 58, 0.25);
+    cursor: grab;
+    user-select: none;
+    position: relative;
+}
+#wlm-titlebar::after {
+    content: '';
+    position: absolute;
+    left: 14px; right: 14px; bottom: -1px; height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(180, 38, 58, 0.5) 50%, transparent);
+}
+.wlm-title {
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    color: #f4e6ea;
+}
+.wlm-titlebar-actions button {
+    background: transparent;
+    border: none;
+    color: rgba(244, 230, 234, 0.7);
+    font-size: 14px;
+    cursor: pointer;
+    padding: 2px 8px;
+    border-radius: 4px;
+}
+.wlm-titlebar-actions button:hover {
+    background: rgba(180, 38, 58, 0.2);
+    color: #fff;
+}
+#wlm-settings-btn { font-size: 11.5px; }
+
+/* ── BODY LAYOUT ───────────────────────────────────── */
+
+#wlm-body {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+}
+
+#wlm-sidebar {
+    width: 240px;
+    min-width: 180px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px;
+    border-right: 1px solid rgba(180, 38, 58, 0.15);
+    overflow-y: auto;
+}
+
+.wlm-sidebar-actions {
+    display: flex;
+    gap: 6px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(180, 38, 58, 0.15);
+}
+
+#wlm-progress-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(180, 38, 58, 0.15);
+    font-size: 11.5px;
+    color: rgba(244, 230, 234, 0.65);
+}
+#wlm-progress-text { flex: 1; }
+#wlm-goal-input {
+    width: 64px;
+    background: rgba(8, 5, 7, 0.7);
+    border: 1px solid rgba(180, 38, 58, 0.3);
+    border-radius: 4px;
+    color: #f4e6ea;
+    padding: 2px 6px;
+    font-size: 11.5px;
+}
+#wlm-goal-edit-btn, #wlm-goal-reset-btn {
+    padding: 2px 7px;
+    font-size: 11px;
+}
+
+#wlm-entry-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.wlm-sidebar-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 13px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid transparent;
+    transition: background 80ms ease-out, border-color 80ms ease-out;
+}
+.wlm-sidebar-row:hover { background: rgba(180, 38, 58, 0.12); border-color: rgba(180, 38, 58, 0.25); }
+.wlm-sidebar-row.wlm-selected { background: rgba(180, 38, 58, 0.22); border-color: rgba(180, 38, 58, 0.6); }
+.wlm-row-draft { border-style: dashed; border-color: rgba(180, 38, 58, 0.3); cursor: pointer; }
+
+.wlm-sidebar-row-label {
+    flex: 1;
+    min-width: 0;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+.wlm-sidebar-row-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.wlm-sidebar-row-date {
+    font-size: 10.5px;
+    color: rgba(244, 230, 234, 0.45);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.wlm-merge-checkbox {
+    flex-shrink: 0;
+    width: 14px;
+    height: 14px;
+    accent-color: rgb(180, 38, 58);
+    cursor: pointer;
+}
+
+.wlm-sidebar-empty {
+    padding: 14px 10px;
+    font-size: 12px;
+    color: rgba(244, 230, 234, 0.45);
+    text-align: center;
+    line-height: 1.5;
+}
+
+/* ── EDITOR ────────────────────────────────────────── */
+
+#wlm-editor {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 12px;
+    gap: 8px;
+    min-width: 0;
+}
+
+#wlm-editor-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid rgba(180, 38, 58, 0.15);
+}
+
+#wlm-editor-title {
+    flex: 1;
+    min-width: 0;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.wlm-editor-meta {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 12px;
+    color: rgba(244, 230, 234, 0.65);
+}
+.wlm-editor-meta select {
+    background: rgba(12, 8, 11, 0.9);
+    color: #f4e6ea;
+    border: 1px solid rgba(180, 38, 58, 0.4);
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: 12px;
+}
+
+#wlm-editor-body {
+    flex: 1;
+    resize: none;
+    padding: 10px 12px;
+    background: rgba(8, 5, 7, 0.7);
+    border: 1px solid rgba(180, 38, 58, 0.25);
+    border-radius: 6px;
+    color: #f4e6ea;
+    font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+    font-size: 12.5px;
+    line-height: 1.5;
+    outline: none;
+}
+#wlm-editor-body:focus {
+    border-color: rgba(180, 38, 58, 0.55);
+    box-shadow: 0 0 0 2px rgba(180, 38, 58, 0.15);
+}
+
+#wlm-editor-body.wlm-generating {
+    background:
+        linear-gradient(90deg, transparent 25%, rgba(180, 38, 58, 0.06) 50%, transparent 75%) 0 0 / 200% 100%,
+        rgba(8, 5, 7, 0.7);
+    animation: wlm-shimmer 2.2s linear infinite;
+    cursor: progress;
+}
+@keyframes wlm-shimmer {
+    0%   { background-position: 200% 0, 0 0; }
+    100% { background-position: -200% 0, 0 0; }
+}
+
+#wlm-editor-actions {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 6px;
+    padding-top: 4px;
+}
+
+#wlm-editor-status {
+    flex: 1;
+    font-size: 11.5px;
+    color: rgba(254, 188, 46, 0.85);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ── SETTINGS PANE ─────────────────────────────────── */
+
+#wlm-settings-pane {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px;
+    overflow-y: auto;
+    min-width: 0;
+}
+#wlm-settings-pane h3 {
+    margin: 0 0 4px 0;
+    font-size: 14px;
+    letter-spacing: 0.3px;
+    color: #f4e6ea;
+    border-bottom: 1px solid rgba(180, 38, 58, 0.2);
+    padding-bottom: 8px;
+}
+
+.wlm-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 12.5px;
+    color: rgba(244, 230, 234, 0.85);
+}
+.wlm-field small { color: rgba(244, 230, 234, 0.45); }
+.wlm-field small code {
+    background: rgba(180, 38, 58, 0.15);
+    border-radius: 3px;
+    padding: 1px 4px;
+    color: rgba(244, 230, 234, 0.8);
+    font-size: 10.5px;
+}
+.wlm-field input[type="text"], .wlm-field input[type="number"], .wlm-field select {
+    background: rgba(8, 5, 7, 0.7);
+    border: 1px solid rgba(180, 38, 58, 0.3);
+    border-radius: 5px;
+    color: #f4e6ea;
+    padding: 6px 8px;
+    font-size: 12.5px;
+    outline: none;
+}
+.wlm-field input:focus, .wlm-field select:focus { border-color: rgba(180, 38, 58, 0.55); }
+.wlm-field.wlm-check {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+}
+.wlm-field.wlm-check input { accent-color: rgb(180, 38, 58); }
+
+.wlm-inline { display: flex; gap: 6px; }
+.wlm-inline input { flex: 1; }
+
+.wlm-recommend-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 2px;
+}
+.wlm-recommend-label {
+    font-size: 11.5px;
+    color: rgba(244, 230, 234, 0.55);
+}
+.wlm-recommend-disclaimer {
+    font-style: italic;
+    line-height: 1.4;
+}
+
+.wlm-settings-actions {
+    margin-top: auto;
+    display: flex;
+    justify-content: flex-end;
+    padding-top: 10px;
+}
+
+/* ── BUTTONS ───────────────────────────────────────── */
+
+.wlm-btn-primary, .wlm-btn-sm {
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    border: 1px solid rgba(180, 38, 58, 0.35);
+    background: linear-gradient(180deg, rgba(30, 18, 24, 0.95), rgba(18, 10, 16, 0.95));
+    color: #f4e6ea;
+    transition: background 80ms ease-out, border-color 80ms ease-out, transform 60ms ease-out;
+}
+.wlm-btn-primary { background: linear-gradient(180deg, rgba(180, 38, 58, 0.85), rgba(120, 24, 40, 0.85)); border-color: rgba(220, 70, 90, 0.6); }
+.wlm-btn-primary:hover, .wlm-btn-sm:hover { transform: translateY(-1px); border-color: rgba(220, 70, 90, 0.7); }
+.wlm-btn-primary:disabled, .wlm-btn-sm:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+.wlm-btn-danger { border-color: rgba(240, 100, 60, 0.55); }
+.wlm-btn-danger:hover { background: linear-gradient(180deg, rgba(240, 100, 60, 0.35), rgba(140, 40, 20, 0.7)); }
+
+/* Only shown inside the mobile breakpoint below — the expand/collapse
+   toggle makes no sense in the desktop side-by-side layout. */
+.wlm-mobile-only { display: none; flex-shrink: 0; }
+
+/* ── MOBILE ────────────────────────────────────────── */
+/* Below 700px there isn't room for the desktop's two-column layout, so the
+   body stacks vertically instead: list on top, editor on bottom. A half-
+   height editor is still cramped for actually reading/writing a memory, so
+   `.wlm-mobile-expanded` (toggled by the ⤢/⤡ button, see toggleMobileExpand
+   in index.js) lets the editor take over most of the screen, collapsing the
+   list down to just its action-button row. */
+
+@media (max-width: 700px) {
+    #wlm-modal {
+        /* The desktop rule's min-width:520px / min-height:360px would force
+           the modal wider/taller than a phone's actual viewport if left in
+           place — that's what was cutting off the right edge and the bottom
+           button row. !important because these are plain stylesheet values
+           fighting the base rule's plain stylesheet values at equal
+           specificity; without it the later-but-not-more-specific base rule
+           can still win depending on source order assumptions. */
+        top: 0; left: 0;
+        width: 100vw !important; height: 100vh !important;
+        min-width: 0 !important; min-height: 0 !important;
+        max-width: 100vw !important; max-height: 100vh !important;
+        /* 100vh is defined by most mobile browsers as the LARGEST possible
+           viewport (as if the address bar were hidden) — when the address
+           bar is actually showing, real visible height is shorter than
+           100vh, and with overflow:hidden there's no way to scroll to
+           whatever got pushed below that gap (the button row, in practice).
+           100dvh tracks the ACTUAL visible viewport and updates live as the
+           address bar shows/hides. These are separate declarations on
+           purpose: if a browser doesn't understand the `dvh` unit, that
+           whole declaration is invalid and ignored, silently falling back
+           to the 100vh above rather than breaking the layout. */
+        height: 100dvh !important;
+        max-height: 100dvh !important;
+        border-radius: 0;
+        resize: none;
+    }
+
+    #wlm-body {
+        flex-direction: column;
+        min-height: 0;
+    }
+
+    #wlm-sidebar {
+        width: auto;
+        min-width: 0;
+        flex: 0 0 42%;
+        min-height: 0;
+        border-right: none;
+        border-bottom: 1px solid rgba(180, 38, 58, 0.15);
+    }
+
+    #wlm-editor, #wlm-settings-pane {
+        flex: 1 1 58%;
+        min-height: 0;
+    }
+
+    /* Classic flexbox gotcha: a textarea's default min-height is "auto",
+       which for intrinsically-sized elements means "big enough to show my
+       content" rather than 0 — that was letting the textarea push the
+       Reroll/Pin/Delete/Save button row down past the bottom of the screen
+       instead of shrinking to fit. */
+    #wlm-editor-body {
+        min-height: 0;
+    }
+
+    .wlm-mobile-only { display: inline-flex; }
+
+    /* Expanded state: list shrinks to just its buttons, editor takes the rest. */
+    #wlm-modal.wlm-mobile-expanded #wlm-sidebar {
+        flex: 0 0 auto;
+    }
+    #wlm-modal.wlm-mobile-expanded #wlm-entry-list,
+    #wlm-modal.wlm-mobile-expanded #wlm-progress-row {
+        display: none;
+    }
+    #wlm-modal.wlm-mobile-expanded #wlm-editor {
+        flex: 1;
+    }
+
+    /* Bigger touch targets throughout — desktop sizing is too small to
+       comfortably tap. */
+    .wlm-btn-primary, .wlm-btn-sm {
+        padding: 9px 14px;
+        font-size: 13.5px;
+    }
+    .wlm-sidebar-actions {
+        flex-wrap: wrap;
+    }
+    .wlm-sidebar-row {
+        padding: 10px 10px;
+        font-size: 14px;
+    }
+    .wlm-sidebar-row-date {
+        font-size: 12px;
+    }
+    .wlm-merge-checkbox {
+        width: 20px;
+        height: 20px;
+    }
+    #wlm-editor-body {
+        font-size: 14px;
+    }
+    .wlm-field {
+        font-size: 14px;
+    }
+    .wlm-field input[type="text"], .wlm-field input[type="number"], .wlm-field select {
+        padding: 9px 10px;
+        font-size: 14px;
+    }
+    #wlm-titlebar {
+        padding: 10px 12px;
+    }
+    #wlm-settings-btn {
+        font-size: 12.5px;
+    }
+}
