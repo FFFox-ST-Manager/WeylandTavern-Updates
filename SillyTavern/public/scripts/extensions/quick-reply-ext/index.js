@@ -309,9 +309,7 @@ async function OnAi(messageID) {
             }
 
             // Clear Script
-            const ClearStart = performance.now();
-            await quickReplyApi.executeQuickReply("Weyland","Clear");
-            DebugLog(`[P] Clear: ${(performance.now() - ClearStart).toFixed(4)}ms`);
+            await Clear();
 
             setLocalVariable("lastMessID", currentMessID); // Update lastMessID to check if message has changed next call
         }
