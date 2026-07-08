@@ -20,7 +20,7 @@ import { charPer, specialChar } from "./src/charper.js";
 import { ravs } from "./src/rav.js";
 import { detector } from "./src/similarity.js";
 
-const debug = true;
+const debug = false;
 
 /**
  * Debug Logs
