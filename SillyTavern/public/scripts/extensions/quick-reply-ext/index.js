@@ -2359,6 +2359,8 @@ async function XXX(charName) {
             setLocalVariable("ThoughtSet", rav.thinkYes);
         } else if (getLocalVariable("SpecialThoughts") && rav.thinkSpec) {
             setLocalVariable("ThoughtSet", rav.thinkSpec);
+        } else {
+            setLocalVariable("ThoughtSet", "[CHARACTER THOUGHTS: DISABLED BY DEFAULT. DO NOT SEND EXPLICITLY STATED CHARACTER THOUGHTS WITH RESPONSES UNLESS {{user}} REQUESTS THEM TO BE ENABLED.]");
         }
         switch (pc) {
             default:
