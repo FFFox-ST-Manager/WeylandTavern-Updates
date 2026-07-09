@@ -7,8 +7,29 @@ if not "%OS%"=="Windows_NT" (
 )
 title Weyland Tavern
 
+REM ÄÄ Self-update guard ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+REM cmd reads batch files by byte offset WHILE they run. If the update
+REM below replaces this file mid-run, cmd resumes at a garbage offset in
+REM the new file and crashes. So: re-launch from a temp copy, letting
+REM git freely replace the original on disk.
+if not defined WT_HOME set "WT_HOME=%~dp0"
+if /i "%~f0"=="%TEMP%\WT-Launcher.bat" goto RunningFromTemp
+copy /y "%~f0" "%TEMP%\WT-Launcher.bat" >nul
+cd /d "%WT_HOME%"
+call "%TEMP%\WT-Launcher.bat" %*
+exit /b
+:RunningFromTemp
+cd /d "%WT_HOME%"
+
 REM Enable ANSI color support in legacy consoles (Windows Terminal has it already)
 reg add HKCU\Console /v VirtualTerminalLevel /t REG_DWORD /d 1 /f >nul 2>&1
+
+REM Detect console codepage - CJK locales (932/936/949/950) treat certain
+REM high-bit bytes as multi-byte lead bytes, which eats our '%' delimiters
+REM inside the box-drawing header and corrupts the batch parser. Fall back
+REM to a plain 7-bit ASCII header on those systems.
+set "USE_FANCY=1"
+for /f "tokens=* usebackq" %%a in (`chcp 2^>nul`) do echo(%%a| findstr /c:" 932" /c:" 936" /c:" 949" /c:" 950" >nul 2>&1 && set "USE_FANCY="
 
 REM Grab the ESC character for ANSI sequences
 for /F "tokens=1,2 delims=#" %%a in ('"prompt #$H#$E# & echo on & for %%b in (1) do rem"') do set "ESC=%%b"
@@ -25,6 +46,7 @@ set "AMB=%ESC%[38;2;230;180;80m"
 set "BLD=%ESC%[1m"
 
 cls
+if not defined USE_FANCY goto WTPlainHeader
 echo.
 echo   %WINE%ÛÛ»    ÛÛ»ÛÛÛÛÛÛÛ»ÛÛ»   ÛÛ»ÛÛ»      ÛÛÛÛÛ» ÛÛÛ»   ÛÛ»ÛÛÛÛÛÛ»%R%
 echo   %WINE%ÛÛº    ÛÛºÛÛÉÍÍÍÍ¼ÈÛÛ» ÛÛÉ¼ÛÛº     ÛÛÉÍÍÛÛ»ÛÛÛÛ»  ÛÛºÛÛÉÍÍÛÛ»%R%
@@ -42,6 +64,26 @@ echo   %WINE%³%R%     %DIM%Closing it will shut down the server.%R%             
 echo   %WINE%ÀÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÙ%R%
 echo.
 
+goto WTHeaderDone
+
+:WTPlainHeader
+echo.
+echo   %WINE%================================================================%R%
+echo.
+echo       %BLD%%PINK%W E Y L A N D   T A V E R N%R%
+echo             %BLD%%WINE%L A U N C H E R%R%
+echo.
+echo                       %GRY%V5.0%R%
+echo         %DIM%by Kressa, Lucky Paw, Shiru ^& FFFox%R%
+echo.
+echo   %WINE%================================================================%R%
+echo.
+echo      %AMB%[!]%R%  %GRY%Keep this window open while using Weyland Tavern.%R%
+echo           %DIM%Closing it will shut down the server.%R%
+echo.
+
+:WTHeaderDone
+
 REM ================= git update check =================
 REM Label-based flow: no multi-line ( ) blocks, no delayed expansion.
 REM Every line parses independently, so a bad line fails visibly at
@@ -58,7 +100,7 @@ set "CURRENT_VERSION="
 for /f "tokens=*" %%a in ('git rev-parse --short HEAD 2^>nul') do set "CURRENT_VERSION=%%a"
 if not defined CURRENT_VERSION set "CURRENT_VERSION=unknown"
 
-echo   %DIM%ú%R%  %GRY%Checking for Weyland Tavern updates...%R%
+echo   %DIM%*%R%  %GRY%Checking for Weyland Tavern updates...%R%
 echo.
 
 git fetch >nul 2>&1
@@ -78,7 +120,7 @@ if not defined apply_update set "apply_update=Y"
 if /i not "%apply_update%"=="Y" goto GitSkipUpdate
 
 echo.
-echo   %DIM%ú%R%  %GRY%Applying update...%R%
+echo   %DIM%*%R%  %GRY%Applying update...%R%
 git pull > SillyTavern\WTUpdate.log 2>&1
 if not errorlevel 1 goto GitUpdateOK
 
@@ -94,12 +136,12 @@ if not defined do_reset set "do_reset=Y"
 if /i not "%do_reset%"=="Y" goto GitAskContinue
 
 echo.
-echo   %DIM%ú%R%  %GRY%Resetting to latest version...%R%
+echo   %DIM%*%R%  %GRY%Resetting to latest version...%R%
 git merge --abort >nul 2>&1
 for /f "tokens=*" %%f in ('git diff --name-only --diff-filter^=U 2^>nul') do (git checkout --theirs "%%f" >nul 2>&1 & git add "%%f" >nul 2>&1)
 git reset --hard origin/%CURRENT_BRANCH% >nul 2>&1
 if errorlevel 1 goto GitResetFailed
-echo   %GRN%û%R%  %GRN%Update applied successfully.%R%
+echo   %GRN%+%R%  %GRN%Update applied successfully.%R%
 goto GitDone
 
 :GitResetFailed
@@ -114,15 +156,15 @@ if /i "%keepgoing%"=="N" exit /b 0
 goto GitDone
 
 :GitUpdateOK
-echo   %GRN%û%R%  %GRN%Update applied successfully.%R%
+echo   %GRN%+%R%  %GRN%Update applied successfully.%R%
 goto GitDone
 
 :GitSkipUpdate
-echo   %DIM%ú%R%  %GRY%Proceeding without update...%R%
+echo   %DIM%*%R%  %GRY%Proceeding without update...%R%
 goto GitDone
 
 :GitUpToDate
-echo   %GRN%û%R%  %GRY%Weyland Tavern is up to date.%R%  %DIM%(version %CURRENT_VERSION%)%R%
+echo   %GRN%+%R%  %GRY%Weyland Tavern is up to date.%R%  %DIM%(version %CURRENT_VERSION%)%R%
 goto GitDone
 
 :GitMissing
@@ -140,14 +182,14 @@ echo   %DIM%ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ%R%
 echo.
 
 :: Install npm dependencies
-pushd %~dp0
+pushd "%WT_HOME%"
 if exist "SillyTavern\config.yaml" (
     powershell -NoProfile -ExecutionPolicy Bypass -Command "$p = Join-Path (Get-Location) 'SillyTavern\config.yaml'; if (Test-Path -LiteralPath $p) { $c = [System.IO.File]::ReadAllText($p); if ($c -match '(?m)^[ \t]*enableCorsProxy:[^\r\n]*') { $c = $c -replace '(?m)^[ \t]*enableCorsProxy:[^\r\n]*', 'enableCorsProxy: true' } else { $c = $c.TrimEnd() + [Environment]::NewLine + 'enableCorsProxy: true' + [Environment]::NewLine }; [System.IO.File]::WriteAllText($p, $c) }"
 )
 
 if not exist "SillyTavern\server.js" goto MissingServer
 
-echo   %DIM%ú%R%  %GRY%Preparing dependencies...%R% %DIM%(first run can take a few minutes)%R%
+echo   %DIM%*%R%  %GRY%Preparing dependencies...%R% %DIM%(first run can take a few minutes)%R%
 set NODE_ENV=production
 cd SillyTavern
 call npm install --no-audit --no-fund --loglevel=error --no-progress --omit=dev >nul 2>&1
@@ -159,7 +201,7 @@ echo   %AMB%­%R%  %GRY%Dependency install reported a problem - starting anyway..
 
 :NpmDone
 echo.
-echo   %DIM%ú%R%  %GRY%Starting the Weyland Tavern server...%R%
+echo   %DIM%*%R%  %GRY%Starting the Weyland Tavern server...%R%
 echo.
 
 :: Close any stale server still holding port 8000 (e.g. orphaned from a previous session)
@@ -176,7 +218,7 @@ start /b node server.js --listen true --listen-host 0.0.0.0 --listen-port 8000 %
 :: (image captioning model and such) BEFORE it starts listening, which
 :: can take several minutes - the old launcher claimed the server was
 :: up while that was still happening.
-echo   %DIM%ú%R%  %GRY%Waiting for the server to come online...%R%
+echo   %DIM%*%R%  %GRY%Waiting for the server to come online...%R%
 echo      %DIM%First launch can take several minutes while extra%R%
 echo      %DIM%components download - this is normal. Hang tight~%R%
 echo.
@@ -215,7 +257,7 @@ echo   %DIM%Press any key to shut down and close Weyland Tavern...%R%
 pause >nul
 
 echo.
-echo   %DIM%ú%R%  %GRY%Shutting down the Weyland Tavern server... see you soon~%R%
+echo   %DIM%*%R%  %GRY%Shutting down the Weyland Tavern server... see you soon~%R%
 set "WT_PID="
 for /f "tokens=5" %%p in ('netstat -ano ^| findstr ":8000.*LISTENING"') do set "WT_PID=%%p"
 if defined WT_PID taskkill /F /PID %WT_PID% >nul 2>&1
