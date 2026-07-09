@@ -51,6 +51,16 @@ export function getCurrentCharacterName() {
     }
 }
 
+export function getCurrentCharacterFirstMes() {
+    try {
+        const charID = getCharacterID();
+        if (charID === undefined) return;
+        return characters[charID].data.first_mes
+    } catch {
+        return
+    }
+}
+
 export function getCurrentCharacterVersion() {
     try {
         const charID = getCharacterID();

@@ -7,8 +7,11 @@ import { selected_world_info, onWorldInfoChange } from "../../world-info.js";
 import { isMobile } from "../../RossAscends-mods.js";
 import { setPersonaLockState } from "../../personas.js";
 import { updateSideCharacter } from "../Side-Character-Loader/index.js";
+import { SlashCommandParser } from "../../slash-commands/SlashCommandParser.js";
+import { SlashCommand } from "../../slash-commands/SlashCommand.js";
+import { ARGUMENT_TYPE, SlashCommandArgument } from "../../slash-commands/SlashCommandArgument.js";
 
-import { getRandomInt, getCurrentCharacterName, getCurrentUserName, setLLModel, setBackground, tagExists, tagAdd, tagRemove, getPersonaBook, getCurrentCharacterWorldbook, setCostume, setExpression, setCostumeAndExpression, getCharacterCostumeFromText, getCurrentCharacterVersion, getCurrentCharacterPersonality, getCurrentCharacterDescription } from "./src/general.js";
+import { getRandomInt, getCurrentCharacterName, getCurrentUserName, setLLModel, setBackground, tagExists, tagAdd, tagRemove, getPersonaBook, getCurrentCharacterWorldbook, setCostume, setExpression, setCostumeAndExpression, getCharacterCostumeFromText, getCurrentCharacterVersion, getCurrentCharacterPersonality, getCurrentCharacterDescription, getCurrentCharacterFirstMes } from "./src/general.js";
 import { deleteGlobalVariable, deleteLocalVariable, deleteLocalVariables, flushInject, inject, setGlobalVariable, setLocalVariable } from "./src/variables.js"
 import { findLoreBookEntry, getEntryField, setEntryField } from "./src/lorebook.js";
 import { doButtons, doPopup } from "./src/popups.js";
@@ -19,7 +22,7 @@ import { charPer, specialChar } from "./src/charper.js";
 import { ravs } from "./src/rav.js";
 import { detector } from "./src/similarity.js";
 
-const debug = false;
+const debug = true;
 
 /**
  * Debug Logs
@@ -130,6 +133,7 @@ async function OnUser(messageID) {
                 await SetupCostumesAndTags(characterName);
                 await CharPer(characterName);
                 await RosterSB(characterName);
+                await SetSchoolYear();
             }
 
             // Weybot
@@ -334,14 +338,26 @@ async function OnChatChanged(chatbookName) {
             checks.skipChatChange = false;
             return;
         }
+        const charName = chatbookName?.split(" ")?.[0]?.trim() || getCurrentCharacterName();
         await quickReplyApi.executeQuickReply("Weyland","~");
         await quickReplyApi.executeQuickReply("Weyland","ExtCheck");
         if (checks.lastChatID !== chatbookName) {
             await quickReplyApi.executeQuickReply("Weyland", "Descr");
             await quickReplyApi.executeQuickReply("Weyland", "PP&PPPLimiters");
-            if (chatbookName?.includes("Rosa") && chat.length === 1 && chat[0].swipe_id === 0) {
-                setLocalVariable("CostmSave", "Rosa/Intro");
-                await setCostume("Rosa/Intro");
+            if (chat.length === 1) {
+                if (!chat[0]?.swipe_id) {
+                    switch (charName) {
+                        case "Rosa":
+                            setLocalVariable("CostmSave", "Rosa/Intro");
+                            await setCostume("Rosa/Intro");
+                            break;
+                        case "Mirror Weyland":
+                        case "Weybot":
+                            if (chat[0]?.mes !== getCurrentCharacterFirstMes()) break;
+                            await AutoStart();
+                            break;
+                    }
+                }
             }
             // TitleBarColors Script
             await TitleBarColors();
@@ -931,11 +947,7 @@ Room 313: Sofya & NPC`, true);
             setLocalVariable("BlakeRoommateSit", "Room 271: Blake & {{user}}", true);
         }
         setLocalVariable("Roommates", strings.rsbRoommates, true);
-        if (!earlyStart) {
-            setLocalVariable("R268", "room 268", true);
-        } else {
-            setLocalVariable("R268", "looking for new dorm", true);
-        }
+        setLocalVariable("R268", earlyStart ? "looking for new dorm" : "room 268", true);
         setLocalVariable("RT", strings.rsbRT, true);
         setLocalVariable("WTavern", strings.rsbWTavern, true);
         setLocalVariable("KinsbaneLoc", "[KINSBANE MANOR] Potential Location: The Kinsbane Manor\nOnce-grand Victorian mansion that now stands as a testament to neglect and time's relentless march. The manor has long since been abandoned, though rumors surround the place of it possibly being haunted. Most will not approach the mansion unless on a dare. Aiko lives here alone. [END KINSBANE MANOR]\n-----", true);
@@ -2155,10 +2167,11 @@ async function SetupCostumesAndTags(charName, charScenarios) {
 /**
  * SetSchoolYear
  * OnUser
+ * @param {string} [startingYear]
  * @returns {Promise<string | undefined>}
  */
-async function SetSchoolYear() {
-    /** @type {string} */ const startingYear = getLocalVariable("StartingYear") || "Freshman";
+async function SetSchoolYear(startingYear) {
+    /** @type {string} */ startingYear = startingYear || getLocalVariable("StartingYear");
     try {
         const offset = {
             Freshman: 0,
@@ -2166,14 +2179,14 @@ async function SetSchoolYear() {
             Junior: 2,
             Senior: 3,
             Alumni: 4
-        }[startingYear] || 0;
+        }[startingYear || "Freshman"] || 0;
 
         /** @param {number} year */
         function MCY(year) {
             if (startingYear === "Alumni") return "alumni";
 
             const stages = [
-                "not yet in college",
+                "not yet present (future character)",
                 "Freshman",
                 "Sophomore",
                 "Junior",
@@ -2240,7 +2253,7 @@ async function SetSchoolYear() {
 
         // Ages
         const ageMin = 19;
-        const ageMax = 61;
+        const ageMax = 90;
         for (let age = ageMin; age <= ageMax; age++) {
             setLocalVariable(`${age}YO`, age + offset, age !== ageMax);
         }
@@ -2382,6 +2395,66 @@ function fCheck() {
 
 // SETUP
 
+function registerSlashCommands() {
+    try {
+        SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+            name: 'wuxxx',
+            callback: async () => {await XXX();return '';}
+        }));
+        SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+            name: 'wurostersb',
+            callback: async () => {await RosterSB();return '';}
+        }));
+        SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+            name: 'wucharper',
+            callback: async () => {await CharPer();return '';}
+        }));
+        SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+            name: 'wuspecialchar',
+            callback: async () => {await SpecialChar();return '';}
+        }));
+        SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+            name: 'wubg',
+            callback: async () => {await BG();return '';}
+        }));
+        SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+            name: 'wuautocostumes',
+            callback: async () => {await AutoCostumes();return '';}
+        }));
+        SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+            name: 'wuexpressions',
+            callback: async () => {await Expressions();return '';}
+        }));
+        SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+            name: 'wuopenworldcostumes',
+            callback: async () => {await OpenWorldCostumes();return '';}
+        }));
+        SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+            name: 'wusidecharacters',
+            callback: async () => {await SideCharacters();return '';}
+        }));
+        SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+            name: 'wusetschoolyear',
+            callback: async (args, startingyear) => {
+                if (typeof startingyear === 'string') {
+                    await SetSchoolYear(startingyear);
+                } else {
+                    await SetSchoolYear();
+                }
+                return '';
+            },
+            unnamedArgumentList: [
+                SlashCommandArgument.fromProps({
+                    description: 'startingyear',
+                    typeList: [ARGUMENT_TYPE.STRING],
+                }),
+            ],
+        }));
+    } catch (err) {
+        DebugLog('Slash command registration failed', err);
+    }
+}
+
 (async function () {
     eventSource.on(event_types.APP_READY, OnStartup);
     eventSource.on(event_types.CHAT_COMPLETION_PROMPT_READY, OnBeforeGeneration);
@@ -2391,4 +2464,5 @@ function fCheck() {
     eventSource.on(event_types.CHAT_CREATED, OnNewChat);
     eventSource.on(event_types.MESSAGE_SWIPED, OnSwipe);
     DebugLog("Setup");
+    registerSlashCommands();
 })();

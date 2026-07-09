@@ -59,22 +59,22 @@ fi
 
 clear
 echo ""
-echo "  ${WINE}██╗    ██╗███████╗██╗   ██╗██╗      █████╗ ███╗   ██╗██████╗${R}"
-echo "  ${WINE}██║    ██║██╔════╝╚██╗ ██╔╝██║     ██╔══██╗████╗  ██║██╔══██╗${R}"
-echo "  ${PINK}██║ █╗ ██║█████╗   ╚████╔╝ ██║     ███████║██╔██╗ ██║██║  ██║${R}"
-echo "  ${PINK}██║███╗██║██╔══╝    ╚██╔╝  ██║     ██╔══██║██║╚██╗██║██║  ██║${R}"
-echo "  ${ROSE}╚███╔███╔╝███████╗   ██║   ███████╗██║  ██║██║ ╚████║██████╔╝${R}"
-echo "  ${ROSE} ╚══╝╚══╝ ╚══════╝   ╚═╝   ╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚═════╝${R}"
+echo "${WINE}██╗    ██╗███████╗██╗   ██╗██╗      █████╗ ███╗   ██╗██████╗${R}"
+echo "${WINE}██║    ██║██╔════╝╚██╗ ██╔╝██║     ██╔══██╗████╗  ██║██╔══██╗${R}"
+echo "${PINK}██║ █╗ ██║█████╗   ╚████╔╝ ██║     ███████║██╔██╗ ██║██║  ██║${R}"
+echo "${PINK}██║███╗██║██╔══╝    ╚██╔╝  ██║     ██╔══██║██║╚██╗██║██║  ██║${R}"
+echo "${ROSE}╚███╔███╔╝███████╗   ██║   ███████╗██║  ██║██║ ╚████║██████╔╝${R}"
+echo "${ROSE} ╚══╝╚══╝ ╚══════╝   ╚═╝   ╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚═════╝${R}"
 echo ""
-echo "  ${DIM}───────────────────────${R}  ${BLD}${PINK}T A V E R N${R}  ${DIM}───────────────────────${R}"
+echo "${DIM}───────────────────────${R}  ${BLD}${PINK}T A V E R N${R}  ${DIM}───────────────────────${R}"
 echo "            ${DIM}V5.0 - by Kressa, Lucky Paw, Shiru & FFFox${R}"
 echo ""
-echo "  ${WINE}┌───────────────────────────────────────────────────────────┐${R}"
-echo "  ${WINE}│${R}  ${AMB}■${R}  ${GRY}Keep this window open while using Weyland Tavern.${R}     ${WINE}│${R}"
-echo "  ${WINE}│${R}     ${DIM}Closing it will shut down the server.${R}                 ${WINE}│${R}"
-echo "  ${WINE}└───────────────────────────────────────────────────────────┘${R}"
+echo "${WINE}┌───────────────────────────────────────────────────────────┐${R}"
+echo "${WINE}│${R}  ${AMB}■${R}  ${GRY}Keep this window open while using Weyland Tavern.${R}     ${WINE}│${R}"
+echo "${WINE}│${R}     ${DIM}Closing it will shut down the server.${R}                 ${WINE}│${R}"
+echo "${WINE}└───────────────────────────────────────────────────────────┘${R}"
 echo ""
-echo "  ${DIM}·${R}  ${GRY}Detected platform:${R} ${PINK}${PLATFORM}${R}"
+echo "${DIM}·${R}  ${GRY}Detected platform:${R} ${PINK}${PLATFORM}${R}"
 echo ""
 
 # ── Git update check ──
@@ -173,7 +173,7 @@ else
 fi
 
 echo ""
-echo "  ${DIM}─────────────────────────────────────────────────────────────${R}"
+echo "${DIM}─────────────────────────────────────────────────────────────${R}"
 echo ""
 
 CONFIG_FILE="SillyTavern/config.yaml"
@@ -194,12 +194,12 @@ if [ ! -f "SillyTavern/server.js" ]; then
 fi
 
 # Install npm dependencies
-echo "  ${DIM}·${R}  ${GRY}Preparing dependencies...${R} ${DIM}(first run can take a few minutes)${R}"
+echo "${DIM}·${R}  ${GRY}Preparing dependencies...${R} ${DIM}(first run can take a few minutes)${R}"
 export NODE_ENV=production
 cd SillyTavern && npm i --no-audit --no-fund --loglevel=error --no-progress --omit=dev > /dev/null 2>&1
 
 echo ""
-echo "  ${DIM}·${R}  ${GRY}Starting the Weyland Tavern server...${R}"
+echo "${DIM}·${R}  ${GRY}Starting the Weyland Tavern server...${R}"
 
 # Start the SillyTavern server in background
 node --max-old-space-size=3072 server.js --listen true --listen-host 0.0.0.0 --listen-port 8000 "$@" > /dev/null 2>&1 &
@@ -218,7 +218,7 @@ trap cleanup EXIT INT TERM
 # On the very first launch, SillyTavern downloads extra components
 # (image captioning model and such) BEFORE it starts listening, which
 # can take several minutes.
-echo "  ${DIM}·${R}  ${GRY}Waiting for the server to come online...${R}"
+echo "${DIM}·${R}  ${GRY}Waiting for the server to come online...${R}"
 echo "     ${DIM}First launch can take several minutes while extra${R}"
 echo "     ${DIM}components download - this is normal. Hang tight~${R}"
 echo ""
@@ -263,9 +263,9 @@ else
     echo ""
 fi
 
-echo "  ${DIM}Press any key to shut down and close Weyland Tavern...${R}"
+echo "${DIM}Press any key to shut down and close Weyland Tavern...${R}"
 read -n 1 -s
 
 echo ""
-echo "  ${DIM}·${R}  ${GRY}Shutting down the Weyland Tavern server... see you soon~${R}"
+echo "${DIM}·${R}  ${GRY}Shutting down the Weyland Tavern server... see you soon~${R}"
 exit 0
