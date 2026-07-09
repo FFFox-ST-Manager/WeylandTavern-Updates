@@ -1538,6 +1538,28 @@ async function BG(charMessage, charName) {
 
                 // GENERAL RESOLUTION
 
+                // Karaveia
+                if (checkMessage("Karaveia")) {
+                    if (checkMessage("Dining")) return "Karaveia Dun Dining Area.avif";
+                    if (checkMessage("Greenhouse")) return "Karaveia Dun Greenhouse.avif";
+                    if (checkMessage("Entrance")) return "Karaveia Dun Entrance.avif";
+                    if (checkMessage(["Hot Springs", "Onsen"])) return "Karaveia Dun Hot Springs.avif";
+                    if (checkMessage(["Residence", "Bedroom"])) return "Karaveia Dun Residence.avif";
+                    if (checkMessage("Hall")) return "Karaveia Dun Halls.avif";
+                    return "Karaveia Dun Communal Area.avif";
+                }
+                
+                // Brodlak
+                if (checkMessage("Brodlak")) return "Brodlak.avif";
+                
+                // Kyomi
+                if (checkMessage("Kyomi")) return "Kyomi.avif";
+                
+                // Mama's Den
+                if (checkMessage("Mama")) {
+                    if (checkMessage("Den")) return "Mama Den.avif";
+                }
+
                 // Observation Room
                 if (checkMessage("Observation Room")) return "observe.avif";
 
