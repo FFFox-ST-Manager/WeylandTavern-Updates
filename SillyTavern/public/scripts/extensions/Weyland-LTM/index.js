@@ -1,7 +1,6 @@
 // =====================================================================
 // Weyland-LTM — Long-Term Memory manager (v1.3.2)
 // =====================================================================
-// Full-JS replacement for the STscript LTM pipeline. 
 // Async draft generation, editable draft window, reroll (regenerates from
 // source when known, otherwise rewrites), pin, merge, bulk-select delete,
 // version history, backward-compat ingest of entries created by the old
