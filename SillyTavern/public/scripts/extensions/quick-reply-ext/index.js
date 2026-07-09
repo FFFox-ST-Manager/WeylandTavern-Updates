@@ -2331,7 +2331,9 @@ async function XXX(charName) {
         const pc = getGlobalVariable("PromptChoice");
         const rav = ravs.get(pc) || ravs.get("Current Prompt");
         if (!rav) throw new Error("No rav found");
-        if (["Summer","Loona","Vera","Belle","Hannah","Seth","Lentyl","Briar","Willow","Bap","Dash"].includes(charName) && rav.thinkYes) {
+        if (["Summer","Loona","Belle","Hannah","Seth","Lentyl","Briar","Willow","Bap","Dash"].includes(charName) && rav.thinkYes) {
+            setLocalVariable("ThoughtSet", rav.thinkYes);
+        } else if (charName === "Vera" && getLocalVariable("Scenario") && rav.thinkYes) {
             setLocalVariable("ThoughtSet", rav.thinkYes);
         } else if (getLocalVariable("SpecialThoughts") && rav.thinkSpec) {
             setLocalVariable("ThoughtSet", rav.thinkSpec);
