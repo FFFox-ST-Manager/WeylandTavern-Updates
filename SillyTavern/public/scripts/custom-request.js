@@ -168,9 +168,19 @@ export class TextCompletionService {
                 if (done) return;
                 if (value.data === '[DONE]') return;
 
+                // Same keep-alive tolerance as ChatCompletionService below:
+                // proxies can emit empty or non-JSON ping events mid-stream.
+                if (!value.data || !value.data.trim()) continue;
+
                 tryParseStreamingError(response, value.data, { quiet: true });
 
-                let data = JSON.parse(value.data);
+                let data;
+                try {
+                    data = JSON.parse(value.data);
+                } catch {
+                    console.debug('Skipping non-JSON stream event', value.data);
+                    continue;
+                }
 
                 if (data?.choices?.[0]?.index > 0) {
                     const swipeIndex = data.choices[0].index - 1;
@@ -407,6 +417,37 @@ export class TextCompletionService {
 /**
  * Creates & sends a chat completion request.
  */
+/**
+ * Fallback for proxies that answer a NON-streaming request with an SSE body
+ * anyway (keep-alive comment lines like ": PROCESSING", then "data:" chunks).
+ * Reassembles the streamed deltas into a single OpenAI-shaped completion
+ * object, or returns null if the text doesn't contain any parseable events.
+ * @param {string} body Raw response body text
+ * @returns {object | null}
+ */
+function reassembleSseBody(body) {
+    if (typeof body !== 'string' || !body.includes('data:')) return null;
+    let content = '';
+    let reasoning = '';
+    let sawEvent = false;
+    for (const line of body.split(/\r?\n/)) {
+        const match = /^data:\s?(.*)$/.exec(line);
+        if (!match) continue; // comments (": PROCESSING") and blank lines
+        const payload = match[1].trim();
+        if (!payload || payload === '[DONE]') continue;
+        let json;
+        try { json = JSON.parse(payload); } catch { continue; }
+        sawEvent = true;
+        const choice = json?.choices?.[0];
+        content += choice?.delta?.content ?? choice?.message?.content ?? choice?.text ?? '';
+        reasoning += choice?.delta?.reasoning_content ?? choice?.delta?.reasoning ?? '';
+    }
+    if (!sawEvent) return null;
+    return {
+        choices: [{ index: 0, message: { role: 'assistant', content, reasoning_content: reasoning || undefined } }],
+    };
+}
+
 export class ChatCompletionService {
     static TYPE = 'openai';
 
@@ -458,7 +499,18 @@ export class ChatCompletionService {
         });
 
         if (!data.stream) {
-            const json = await response.json();
+            const responseText = await response.text();
+            let json;
+            try {
+                json = JSON.parse(responseText);
+            } catch {
+                // Some proxies stream an SSE body even when stream:false was
+                // requested — reassemble it instead of dying on JSON.parse.
+                json = reassembleSseBody(responseText);
+                if (!json) {
+                    throw new Error(`Response is neither JSON nor a readable event stream (starts with: ${responseText.slice(0, 64)})`);
+                }
+            }
             if (!response.ok || json.error) {
                 throw json;
             }
@@ -501,8 +553,20 @@ export class ChatCompletionService {
                 if (done) return;
                 const rawData = value.data;
                 if (rawData === '[DONE]') return;
+                // Some reverse proxies emit keep-alive pings while a slow or
+                // thinking model works (": PROCESSING" comment heartbeats, or
+                // empty "data:" lines). Those surface here as empty or
+                // non-JSON events — skip them instead of letting JSON.parse
+                // abort the entire generation.
+                if (!rawData || !rawData.trim()) continue;
                 tryParseStreamingError(response, rawData, { quiet: true });
-                const parsed = JSON.parse(rawData);
+                let parsed;
+                try {
+                    parsed = JSON.parse(rawData);
+                } catch {
+                    console.debug('Skipping non-JSON stream event', rawData);
+                    continue;
+                }
 
                 const reply = getStreamingReply(parsed, state, {
                     chatCompletionSource: data.chat_completion_source,
