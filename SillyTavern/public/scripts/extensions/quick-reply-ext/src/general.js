@@ -51,11 +51,42 @@ export function getCurrentCharacterName() {
     }
 }
 
+export function getCurrentCharacterFirstMes() {
+    try {
+        const charID = getCharacterID();
+        if (charID === undefined) return;
+        return characters[charID].data.first_mes
+    } catch {
+        return
+    }
+}
+
+export function getCurrentCharacterVersion() {
+    try {
+        const charID = getCharacterID();
+        if (charID === undefined) return;
+        const version = parseInt(characters[charID]?.data?.character_version);
+        return version
+    } catch {
+        return
+    }
+}
+
 export function getCurrentCharacterPersonality() {
     try {
         const charID = getCharacterID();
         if (charID === undefined) return;
         return characters[charID].data.personality
+    } catch {
+        return
+    }
+}
+
+export function getCurrentCharacterDescription() {
+    try {
+        const charID = getCharacterID();
+        if (charID === undefined) return;
+        return characters[charID].data.description
     } catch {
         return
     }
