@@ -1,9 +1,9 @@
 @echo off
 title Weyland Tavern Repair
 
-if not exist "%~dp0SillyTavern/Repair-WeylandTavern.js" (
-    echo Repair-WeylandTavern.js was not found in the SillyTavern directory.
-    echo Please make sure the Repair-WeylandTavern.js file is there.
+if not exist "%~dp0Repair-WeylandTavern.cjs" (
+    echo Repair-WeylandTavern.cjs was not found next to this script.
+    echo Please make sure the Repair-WeylandTavern.cjs file is there.
     pause
     exit /b 1
 )
@@ -16,4 +16,4 @@ if errorlevel 1 (
     exit /b 1
 )
 
-node "%~dp0SillyTavern/Repair-WeylandTavern.js" %* & exit /b
+node "%~dp0Repair-WeylandTavern.cjs" %* & exit /b
