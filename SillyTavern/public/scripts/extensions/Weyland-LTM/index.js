@@ -64,7 +64,7 @@ const defaultSettings = {
     enabled: true,
     debug: false,
     modelOverride: RECOMMENDED_LTM_MODEL,
-    messagesBetweenLTMs: 100,
+    messagesBetweenLTMs: 50,
     activeLTMCount: 3,
     maxVersionsPerEntry: 10,
     maxResponseTokens: 2000,
