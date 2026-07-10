@@ -229,10 +229,42 @@ while [ $wait_ticks -lt 300 ]; do
     if ! kill -0 $SERVER_PID 2>/dev/null; then
         break
     fi
-    if node -e "const s=require('net').connect(8000,'127.0.0.1');s.on('connect',()=>{s.end();process.exit(0)});s.on('error',()=>process.exit(1));setTimeout(()=>process.exit(1),1500)" > /dev/null 2>&1; then
+
+    if node -e "
+        const http = require('http');
+        const req = http.request({
+            host: '127.0.0.1',
+            port: 8000,
+            path: '/csrf-token',
+            method: 'GET',
+            timeout: 1000,
+        }, (res) => {
+            if (res.statusCode !== 200) process.exit(1);
+            let body = '';
+            res.setEncoding('utf8');
+            res.on('data', chunk => body += chunk);
+            res.on('end', () => {
+                try {
+                    const data = JSON.parse(body);
+                    process.exit(
+                        typeof data.token === 'string' && data.token.length > 0 ? 0 : 1
+                    );
+                } catch {
+                    process.exit(1);
+                }
+            });
+        });
+        req.on('timeout', () => {
+            req.destroy();
+            process.exit(1);
+        });
+        req.on('error', () => process.exit(1));
+        req.end();
+    " > /dev/null 2>&1; then
         server_up=1
         break
     fi
+
     wait_ticks=$((wait_ticks + 1))
     sleep 2
 done

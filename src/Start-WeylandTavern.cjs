@@ -5,16 +5,6 @@
  * Weyland Tavern Launcher - V6.0 (Node port of the V5 batch script)
  * by Kressa, Lucky Paw, Shiru & FFFox
  *
- * Why Node instead of batch:
- *  - cmd reads .bat files by byte offset WHILE they run, so the old script
- *    had to copy itself to %TEMP% and relaunch before git pull could
- *    replace it. That self-copy pattern is a classic AV heuristic trigger
- *    (Gen:Heur.Bat.*). Node loads this whole file into memory at startup,
- *    so git can freely replace it on disk mid-run - no relaunch trick needed.
- *  - Node writes to the Windows console via WriteConsoleW, so the Unicode
- *    header renders correctly on CJK codepages too - no chcp detection or
- *    plain-ASCII fallback required.
- *
  * Requires Node 18+. Zero dependencies - runs before npm install.
  * Kept self-contained on purpose: it must work even if every other file
  * in the repo is broken (that's what the repair tool is for).
@@ -22,13 +12,16 @@
 
 const { spawn, spawnSync } = require('child_process');
 const fs = require('fs');
-const net = require('net');
+const http = require('http');
 const path = require('path');
 const readline = require('readline');
 
+const WTDirectory = path.join(__dirname, "..");
+const STDirectory = path.join(WTDirectory, "SillyTavern");
+
 // Anchor everything to the folder this script lives in, never the process
 // CWD (launched "as administrator", Windows defaults CWD to System32).
-process.chdir(__dirname);
+process.chdir(WTDirectory);
 
 const tty = process.stdout.isTTY;
 const esc = (code) => (tty ? `\x1b[${code}m` : '');
@@ -104,12 +97,42 @@ function killPid(pid) {
   }
 }
 
-function portListening(port) {
+function serverReady() {
   return new Promise((resolve) => {
-    const socket = net.createConnection({ host: '127.0.0.1', port, timeout: 1000 });
-    socket.once('connect', () => { socket.destroy(); resolve(true); });
-    socket.once('error', () => resolve(false));
-    socket.once('timeout', () => { socket.destroy(); resolve(false); });
+    const req = http.request({
+      host: '127.0.0.1',
+      port: 8000,
+      path: '/csrf-token',
+      method: 'GET',
+      timeout: 1000,
+    }, (res) => {
+      if (res.statusCode !== 200) {
+        res.resume();
+        resolve(false);
+        return;
+      }
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => {
+        body += chunk;
+      });
+      res.on('end', () => {
+        try {
+          const data = JSON.parse(body);
+          resolve(typeof data.token === 'string' && data.token.length > 0);
+        } catch {
+          resolve(false);
+        }
+      });
+    });
+    req.on('timeout', () => {
+      req.destroy();
+      resolve(false);
+    });
+    req.on('error', () => {
+      resolve(false);
+    });
+    req.end();
   });
 }
 
@@ -197,7 +220,7 @@ async function gitUpdateCheck() {
   // trick for this; that's the pattern AV heuristics kept flagging.
   const pull = spawnSync('git', ['pull'], { encoding: 'utf8' });
   try {
-    fs.writeFileSync(path.join(__dirname, 'SillyTavern', 'WTUpdate.log'), (pull.stdout || '') + (pull.stderr || ''));
+    fs.writeFileSync(path.join(STDirectory, 'WTUpdate.log'), (pull.stdout || '') + (pull.stderr || ''));
   } catch {}
   if (!pull.error && pull.status === 0) {
     log(`  ${GRN}+${R}  ${GRN}Update applied successfully.${R}`);
@@ -240,7 +263,7 @@ async function main() {
 
   // Keep the CORS proxy enabled in SillyTavern's config (same patch the
   // old launcher applied through an inline PowerShell block).
-  const configPath = path.join(__dirname, 'SillyTavern', 'config.yaml');
+  const configPath = path.join(STDirectory, 'config.yaml');
   try {
     if (fs.existsSync(configPath)) {
       let config = fs.readFileSync(configPath, 'utf8');
@@ -253,7 +276,7 @@ async function main() {
     }
   } catch {}
 
-  if (!fs.existsSync(path.join(__dirname, 'SillyTavern', 'server.js'))) {
+  if (!fs.existsSync(path.join(STDirectory, 'server.js'))) {
     log(`  ${WINE}x${R}  ${WINE}SillyTavern${path.sep}server.js was not found next to this launcher.${R}`);
     log(`     ${DIM}Make sure the launcher sits in your WeylandTavern folder.${R}`);
     await waitEnter();
@@ -263,7 +286,7 @@ async function main() {
 
   log(`  ${DIM}*${R}  ${GRY}Preparing dependencies...${R} ${DIM}(first run can take a few minutes)${R}`);
   const npmResult = spawnSync('npm install --no-audit --no-fund --loglevel=error --no-progress --omit=dev', {
-    cwd: path.join(__dirname, 'SillyTavern'),
+    cwd: STDirectory,
     shell: true,
     stdio: 'ignore',
     env: { ...process.env, NODE_ENV: 'production' },
@@ -288,7 +311,7 @@ async function main() {
     process.execPath,
     ['server.js', '--listen', 'true', '--listen-host', '0.0.0.0', '--listen-port', '8000', ...process.argv.slice(2)],
     {
-      cwd: path.join(__dirname, 'SillyTavern'),
+      cwd: STDirectory,
       stdio: 'ignore',
       env: { ...process.env, NODE_ENV: 'production' },
     }
@@ -305,8 +328,10 @@ async function main() {
 
   let up = false;
   for (let tick = 0; tick < 300 && !up; tick++) {
-    up = await portListening(8000);
-    if (!up) await sleep(2000);
+    up = await serverReady();
+    if (!up) {
+      await sleep(2000);
+    }
   }
 
   if (up) {
