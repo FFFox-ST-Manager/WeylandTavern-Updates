@@ -1,10 +1,25 @@
 // =====================================================================
-// Weyland-LTM — Long-Term Memory manager (v1.3.2)
+// Weyland-LTM — Long-Term Memory manager (v1.3.3)
 // =====================================================================
-// Async draft generation, editable draft window, reroll (regenerates from
+// Full-JS replacement for the STscript LTM pipeline (Sleep / LTMPrompt /
+// LTMDisabler / MemorySaver). Async draft generation, editable draft
+// window (with a dedicated editable title field), reroll (regenerates from
 // source when known, otherwise rewrites), pin, merge, bulk-select delete,
 // version history, backward-compat ingest of entries created by the old
 // system.
+//
+// Generation goes through ChatCompletionService (raw API call) rather
+// than the chat Generate() pipeline, so:
+//   - Weyland-Router's interceptor never fires on LTM calls (no pause
+//     dance needed)
+//   - streaming works into our own editor even when chat streaming is
+//     globally disabled
+//   - a per-call model override never touches the user's settings
+//
+// See README.md for the full architecture writeup (prompt structure,
+// storage format, the character-card POV tag convention) and
+// USER_GUIDE.md for the plain-language version to hand to end users.
+// =====================================================================
 
 import {
     loadWorldInfo,
@@ -13,11 +28,11 @@ import {
     createNewWorldInfo,
     METADATA_KEY,
     world_names,
-} from '../../world-info.js';
-import { oai_settings } from '../../openai.js';
-import { SlashCommand } from '../../slash-commands/SlashCommand.js';
-import { SlashCommandParser } from '../../slash-commands/SlashCommandParser.js';
-loadWorldInfo
+} from '../../../world-info.js';
+import { oai_settings } from '../../../openai.js';
+import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
+import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
+
 const ctx = SillyTavern.getContext();
 const {
     extensionSettings,
@@ -27,7 +42,7 @@ const {
 } = ctx;
 
 export const WLM_MODULE_NAME = 'Weyland-LTM';
-const EXT_VERSION = '1.3.2';
+const EXT_VERSION = '1.3.3';
 
 // Default LTM model out of the box for every fresh install. Lucky wants
 // Sonnet reserved for actual roleplay messaging rather than burned on LTM
@@ -301,12 +316,17 @@ function computeRangeFromCurrentChat() {
     const chat = SillyTavern.getContext().chat || [];
     const last = chat.length - 1;
     const state = settings.__chatState[getCurrentChatId()];
-    // Start after the last message covered by a previous LTM, capped so a
-    // giant backlog doesn't blow the context window.
-    const HARD_CAP = 200;
+    // Start after the last message covered by a previous LTM, capped at the
+    // cadence setting. The cap matters most when no coverage was ever
+    // recorded — a fresh install on a long-running chat, or a chat whose
+    // only LTMs are legacy entries from the old STscript system (which
+    // never wrote __chatState) — where an uncapped range would ship the
+    // ENTIRE chat history to the model. "Every N messages" is also the
+    // natural size for a single memory, so the cadence doubles as the cap.
+    const span = Math.max(10, Number(settings.messagesBetweenLTMs) || 50);
     let first = (state?.lastLtmMessageId ?? -1) + 1;
-    if (last - first + 1 > HARD_CAP) first = last - HARD_CAP + 1;
-    if (first > last) first = Math.max(0, last - settings.messagesBetweenLTMs + 1);
+    if (last - first + 1 > span) first = last - span + 1;
+    if (first > last) first = Math.max(0, last - span + 1);
     return { firstMessageId: Math.max(0, first), lastMessageId: Math.max(0, last) };
 }
 
@@ -319,7 +339,7 @@ function computeRangeFromCurrentChat() {
 function getEffectiveGoal(chatId = getCurrentChatId()) {
     const state = settings.__chatState[chatId];
     if (Number.isInteger(state?.goalOverride)) return state.goalOverride;
-    return (state?.lastLtmMessageId ?? -1) + Number(settings.messagesBetweenLTMs || 100);
+    return (state?.lastLtmMessageId ?? -1) + Number(settings.messagesBetweenLTMs || 50);
 }
 
 function setGoalOverride(chatId, absoluteMessageId) {
@@ -347,6 +367,14 @@ function recordLTMCoverage(lastMessageId) {
 // =====================================================================
 // Every prompt builder below returns a MESSAGE ARRAY, not a single string,
 // structured as a sandwich:
+//   1. system  — the ruleset (who, format, anti-hallucination, date handling)
+//   2. user    — the raw material (chat excerpt / existing entries)
+//   3. user    — a short, high-recency reminder sent LAST, right before
+//      generation, explicitly telling the model to stop roleplaying and
+//      produce the entry now. Models weight the most recent turn heaviest,
+//      so this is where "don't just think and then stop" belongs — burying
+//      it up in the system message with everything else was letting models
+//      wander off after a long <think> block and never actually answer.
 
 const THINKING_DISCIPLINE = `Keep any <think></think> reasoning SHORT — a handful of terse bullet points, not an essay. The instant you close </think>, continue in that SAME response with the actual output. Stopping after only the thinking block is a failure — you are not done until [END MEMORY ENTRY] (or the equivalent closing marker) has been written.`;
 
@@ -515,6 +543,8 @@ function stripThinkBlocks(text) {
     return String(text || '')
         .replace(/<think>[\s\S]*?<\/think>/gi, '')
         .replace(/<thinking>[\s\S]*?<\/thinking>/gi, '')
+        // Unclosed think block (mid-stream): hide everything from the tag on,
+        // so reasoning never flashes in the editor while streaming.
         .replace(/<think(?:ing)?>[\s\S]*$/i, '')
         .trim();
 }
@@ -575,6 +605,13 @@ function extractDateFromDraft(text) {
     return m ? m[1].trim() : '';
 }
 
+/**
+ * Safety net for entries saved during v1.1.0's brief window where the model
+ * was (wrongly) told to write literal {{char}}/{{user}} tokens into its
+ * output. Resolves any that slipped through so old saved entries don't show
+ * broken placeholder text in the sidebar/editor — harmless no-op on entries
+ * that never had the bug (real names pass through unchanged).
+ */
 function displayName(text) {
     return String(text || '')
         .replace(/\{\{char\}\}/gi, getCurrentCharacterName())
@@ -720,6 +757,12 @@ function getChatBookNameIfExists() {
 }
 
 // Backward-compat detection for entries created by the old STscript pipeline
+// (Sleep/LTMPrompt), which tagged entries with a plain numeric automationId
+// (its own internal counter) rather than our "ltm:<uuid>" marker. A numeric
+// ID alone isn't proof — plenty of unrelated WI entries could have a numeric
+// automationId for other reasons — so it's only trusted as legacy-LTM if the
+// content/comment ALSO looks like a memory entry. This is how old users' pre-
+// existing memories get picked up by the new panel with zero migration step.
 function entryLooksLikeLTM(entry) {
     const autoId = String(entry.automationId ?? '');
     if (autoId.startsWith(LTM_MARKER_PREFIX)) return true;
@@ -1118,7 +1161,7 @@ function injectModal() {
 
     // Settings inputs → live-save on change
     bindSetting('wlm-set-model', 'modelOverride', v => String(v || '').trim());
-    bindSetting('wlm-set-cadence', 'messagesBetweenLTMs', v => Math.max(10, Number(v) || 100));
+    bindSetting('wlm-set-cadence', 'messagesBetweenLTMs', v => Math.max(10, Number(v) || 50));
     bindSetting('wlm-set-active', 'activeLTMCount', v => Math.max(0, Number(v) || 3));
     bindSetting('wlm-set-maxtokens', 'maxResponseTokens', v => Math.max(500, Number(v) || 2000));
     bindSetting('wlm-set-stream', 'streamDrafts', null, true);
