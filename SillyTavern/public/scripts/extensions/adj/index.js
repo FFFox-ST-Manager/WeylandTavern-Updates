@@ -9,11 +9,13 @@ const ltm = 0.4;
     const originalFetch = window.fetch;
     window.fetch = async function(...args) {
         let [url, request] = args;
+        let requestedStream = false;
         // @ts-ignore
         if (url.includes('/generate') && request?.method === 'POST') {
             // @ts-ignore
             let body = JSON.parse(request.body);
             if (body) {
+                requestedStream = !!body.stream;
                 if (body.chat_completion_source === "custom") {
                     if (!/https:\/\/(?:helixmind\.online|api\.electronhub\.ai|api\.zukijourney\.com|api\.zanity\.xyz(?:\/rp)?|fresedgpt\.space|ai\.megallm\.io|api\.z\.ai\/api\/coding\/paas(?:\/v4)|.*chutes\.ai|api\.meganova\.ai|api\.nebulablock\.com|api\.synthetic\.new|api\.naga\.ac|.*\.wey\.onl|.*\.ggez\.pro)(?:\/v1|)?/.test(body.custom_url)) {
                         delete request.body;
@@ -65,20 +67,25 @@ const ltm = 0.4;
 
         const response = await originalFetch.apply(this, [url, request]);
         // @ts-ignore
-        if (url.includes('/generate') && request?.method === 'POST' && !(!!$('#stream_toggle').prop('checked'))) {
-            const clonedResponse = response.clone();
-            const data = await clonedResponse.json();
-            const m = data.choices[0].message;
-            if (!m.content && m.reasoning_content) {
-                m.content = m.reasoning_content;
-                m.reasoning_content = "";
+        if (url.includes('/generate') && request?.method === 'POST' && !requestedStream) {
+            try {
+                const clonedResponse = response.clone();
+                const data = await clonedResponse.json();
+                const m = data.choices[0].message;
+                if (!m.content && m.reasoning_content) {
+                    m.content = m.reasoning_content;
+                    m.reasoning_content = "";
+                }
+                data.choices[0].message = m;
+                return new Response(JSON.stringify(data), {
+                    status: response.status,
+                    statusText: response.statusText,
+                    headers: new Headers(response.headers)
+                });
+            } catch (err) {
+                console.warn('[adj] non-stream post-processing skipped:', err);
+                return response;
             }
-            data.choices[0].message = m;
-            return new Response(JSON.stringify(data), {
-                status: response.status,
-                statusText: response.statusText,
-                headers: new Headers(response.headers)
-            });
         }
         return response;
     };
