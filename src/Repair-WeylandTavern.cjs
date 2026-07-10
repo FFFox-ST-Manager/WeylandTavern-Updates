@@ -24,9 +24,12 @@ const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
 
+const WTDirectory = path.join(__dirname, "..");
+const STDirectory = path.join(WTDirectory, "SillyTavern");
+
 // Anchor everything to the folder this script lives in, never the process
 // CWD (launched "as administrator", Windows defaults CWD to System32).
-process.chdir(__dirname);
+process.chdir(WTDirectory);
 
 const tty = process.stdout.isTTY;
 const esc = (code) => (tty ? `\x1b[${code}m` : '');
@@ -165,19 +168,24 @@ function printDivider() {
 
 const BASE = 'http://127.0.0.1:8000';
 
-async function serverIsUp() {
+async function serverReady() {
   try {
-    await fetch(`${BASE}/csrf-token`, { signal: AbortSignal.timeout(1500) });
-    return true;
+    const response = await fetch(`${BASE}/csrf-token`, {
+      signal: AbortSignal.timeout(1000),
+    });
+
+    if (!response.ok) {
+      return false;
+    }
+
+    const data = await response.json();
+    return typeof data.token === "string" && data.token.length > 0;
   } catch {
     return false;
   }
 }
 
 async function redownloadCharacters() {
-  // Mirrors the old PowerShell one-liner: fetch a CSRF token (keeping the
-  // session cookie), rebuild the manifest, then ask the server to re-download
-  // every character that has a version stamp.
   try {
     const tokenRes = await fetch(`${BASE}/csrf-token`, { signal: AbortSignal.timeout(30000) });
     const rawCookies = tokenRes.headers.getSetCookie
@@ -260,7 +268,7 @@ async function main() {
     log(`     ${PINK}${backupDir}${R}`);
     let backupOk = true;
     try {
-      fs.cpSync(path.join(__dirname, 'SillyTavern', 'data'), backupDir, { recursive: true });
+      fs.cpSync(path.join(STDirectory, 'data'), backupDir, { recursive: true });
     } catch {
       backupOk = false;
     }
@@ -311,12 +319,12 @@ async function main() {
   // --- Rebuild dependencies from scratch ---
   log(`  ${DIM}[3/4]${R}  ${GRY}Removing old dependencies...${R}`);
   try {
-    fs.rmSync(path.join(__dirname, 'SillyTavern', 'node_modules'), { recursive: true, force: true });
+    fs.rmSync(path.join(STDirectory, 'node_modules'), { recursive: true, force: true });
   } catch {}
 
   log(`  ${DIM}[4/4]${R}  ${GRY}Reinstalling dependencies from scratch...${R} ${DIM}(this can take a few minutes)${R}`);
   const npmResult = spawnSync('npm install --no-audit --no-fund --loglevel=error --no-progress --omit=dev', {
-    cwd: path.join(__dirname, 'SillyTavern'),
+    cwd: STDirectory,
     shell: true,
     stdio: 'ignore',
     env: { ...process.env, NODE_ENV: 'production' },
@@ -341,14 +349,16 @@ async function main() {
       log('');
       log(`  ${DIM}›${R}  ${GRY}Starting a temporary local server for the re-download...${R}`);
       const server = spawn(process.execPath, ['server.js', '--listen', 'false', '--port', '8000'], {
-        cwd: path.join(__dirname, 'SillyTavern'),
+        cwd: STDirectory,
         stdio: 'ignore',
       });
 
       let up = false;
-      for (let i = 0; i < 150 && !up; i++) {
-        up = await serverIsUp();
-        if (!up) await sleep(2000);
+      for (let tick = 0; tick < 300 && !up; tick++) {
+        up = await serverReady();
+        if (!up) {
+          await sleep(2000);
+        }
       }
 
       if (!up) {

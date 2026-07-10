@@ -1,8 +1,8 @@
 @echo off
 title Weyland Tavern
 
-if not exist "%~dp0Start-WeylandTavern.cjs" (
-    echo Start-WeylandTavern.cjs was not found next to this launcher.
+if not exist "%~dp0src/Start-WeylandTavern.cjs" (
+    echo Start-WeylandTavern.cjs was not found inside the 'src' directory.
     echo Please make sure the Start-WeylandTavern.cjs file is there.
     pause
     exit /b 1
@@ -16,4 +16,4 @@ if errorlevel 1 (
     exit /b 1
 )
 
-node "%~dp0Start-WeylandTavern.cjs" %* & exit /b
+node "%~dp0src/Start-WeylandTavern.cjs" %* & exit /b
