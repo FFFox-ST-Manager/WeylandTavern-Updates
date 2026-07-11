@@ -113,7 +113,9 @@ export async function downloadCharacters(characterNames, reDownload = false) {
                 'Content-Type': 'application/json',
                 'X-Csrf-Token': csrfToken,
                 'X-User-Handle': getCurrentUserHandle() || 'default-user',
-                'X-Redownload': String(reDownload)
+                'X-Redownload': String(reDownload),
+                'X-RedownloadPNG': 'true', // TODO: Add specific re-download modes for PNGs
+                'X-RedownloadEXP': String(reDownload) // TODO: Add specific re-download modes for Expressions
             },
             body: JSON.stringify({ characters: characterNames })
         });
