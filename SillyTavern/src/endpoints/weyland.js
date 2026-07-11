@@ -550,6 +550,8 @@ router.post('/download', async (request, response) => {
     try {
         const userHandle = request.header('X-User-Handle') || 'default-user';
         const reDownload = (request.header('X-Redownload') || 'false').toLowerCase() === 'true';
+        const reDownloadPngs = (request.header('X-RedownloadPNG') || 'true').toLowerCase() !== 'false';
+        const reDownloadExpressions = (request.header('X-RedownloadEXP') || 'false').toLowerCase() === 'true';
         const { characters } = request.body;
         if (!pendingDiff) {
             return response.status(400).json({ error: 'No diff available, fetch manifests first' });
@@ -574,7 +576,7 @@ router.post('/download', async (request, response) => {
         if (reDownload) {
             if (!remoteManifest || typeof remoteManifest === 'string') throw new Error(`Cannot load character for re-download`);
             // Filter remote to only requested characters
-            diffChars = remoteManifest.characters.filter(c => characters.includes(c.name)).map(c => ({...c, updatePng: true}));
+            diffChars = remoteManifest.characters.filter(c => characters.includes(c.name)).map(c => ({...c, updatePng: reDownloadPngs}));
         } else {
             // Filter diff to only requested characters
             diffChars = pendingDiff.characters.filter(c => characters.includes(c.name));
@@ -642,70 +644,73 @@ router.post('/download', async (request, response) => {
                 });
             }
 
-            for (const diffSub of diffChar.subcharacters) {
-                let localSub = localChar.subcharacters.find(s => s.name === diffSub.name);
-                if (!localSub) {
-                    localSub = { name: diffSub.name, costumes: [] };
-                    localChar.subcharacters.push(localSub);
-                }
-
-                for (const diffCostume of diffSub.costumes) {
-                    let localCostume = localSub.costumes.find(c => c.name === diffCostume.name);
-                    if (!localCostume) {
-                        localCostume = { name: diffCostume.name, expressions: [] };
-                        localSub.costumes.push(localCostume);
+            if (!reDownload || reDownloadExpressions) {
+                for (const diffSub of diffChar.subcharacters) {
+                    let localSub = localChar.subcharacters.find(s => s.name === diffSub.name);
+                    if (!localSub) {
+                        localSub = { name: diffSub.name, costumes: [] };
+                        localChar.subcharacters.push(localSub);
                     }
 
-                    const costumePath = join(charactersPath, diffSub.name, diffCostume.name);
+                    for (const diffCostume of diffSub.costumes) {
+                        let localCostume = localSub.costumes.find(c => c.name === diffCostume.name);
+                        if (!localCostume) {
+                            localCostume = { name: diffCostume.name, expressions: [] };
+                            localSub.costumes.push(localCostume);
+                        }
 
-                    for (const diffExpr of diffCostume.expressions) {
-                        const url = `${BASE_URL}/Characters/${zoneFolder}/${diffChar.name}/${diffSub.name}/${diffCostume.name}/${diffExpr.filename}`;
-                        const destPath = join(costumePath, diffExpr.filename);
-                        const characterName = diffChar.name;
-                        const costumeName = diffCostume.name;
-                        const filename = diffExpr.filename;
-                        const version = diffExpr.version;
+                        const costumePath = join(charactersPath, diffSub.name, diffCostume.name);
 
-                        downloadTasks.push(async () => {
-                            if (aborted) return;
-                            try {
-                                const response = await downloadWithRetry(url, abortController.signal);
-                                if (!response) throw new Error('Failed after retry');
+                        for (const diffExpr of diffCostume.expressions) {
+                            const url = `${BASE_URL}/Characters/${zoneFolder}/${diffChar.name}/${diffSub.name}/${diffCostume.name}/${diffExpr.filename}`;
+                            const destPath = join(costumePath, diffExpr.filename);
+                            const characterName = diffChar.name;
+                            const costumeName = diffCostume.name;
+                            const filename = diffExpr.filename;
+                            const version = diffExpr.version;
 
-                                const buffer = Buffer.from(await response.arrayBuffer());
-                                await mkdir(costumePath, { recursive: true });
-                                await writeFile(destPath, buffer);
+                            downloadTasks.push(async () => {
+                                if (aborted) return;
+                                try {
+                                    const response = await downloadWithRetry(url, abortController.signal);
+                                    if (!response) throw new Error('Failed after retry');
 
-                                const localExpr = localCostume.expressions.find(e => e.filename === filename);
-                                if (localExpr) {
-                                    localExpr.version = version;
-                                } else {
-                                    localCostume.expressions.push({ filename, version });
+                                    const buffer = Buffer.from(await response.arrayBuffer());
+                                    await mkdir(costumePath, { recursive: true });
+                                    await writeFile(destPath, buffer);
+
+                                    const localExpr = localCostume.expressions.find(e => e.filename === filename);
+                                    if (localExpr) {
+                                        localExpr.version = version;
+                                    } else {
+                                        localCostume.expressions.push({ filename, version });
+                                    }
+
+                                    consecutiveFailures = 0;
+
+                                    const charProgress = charTotals.get(characterName);
+                                    charProgress.completed++;
+                                    emitEvent('progress', { character: characterName, completed: charProgress.completed, total: charProgress.total });
+                                } catch (error) {
+                                    failed.push({ character: characterName, file: `/${costumeName}/${filename}` });
+                                    if (error.name === 'AbortError') return;
+                                    consecutiveFailures++;
+
+                                    const charProgress = charTotals.get(characterName);
+                                    charProgress.failed++;
+                                    emitEvent('error', { character: characterName, message: `${charProgress.failed} file(s) failed to download` });
+
+                                    if (consecutiveFailures >= 10) {
+                                        aborted = true;
+                                        abortController.abort();
+                                    }
                                 }
-
-                                consecutiveFailures = 0;
-
-                                const charProgress = charTotals.get(characterName);
-                                charProgress.completed++;
-                                emitEvent('progress', { character: characterName, completed: charProgress.completed, total: charProgress.total });
-                            } catch (error) {
-                                failed.push({ character: characterName, file: `/${costumeName}/${filename}` });
-                                if (error.name === 'AbortError') return;
-                                consecutiveFailures++;
-
-                                const charProgress = charTotals.get(characterName);
-                                charProgress.failed++;
-                                emitEvent('error', { character: characterName, message: `${charProgress.failed} file(s) failed to download` });
-
-                                if (consecutiveFailures >= 10) {
-                                    aborted = true;
-                                    abortController.abort();
-                                }
-                            }
-                        });
+                            });
+                        }
                     }
                 }
             }
+            
 
             if (diffChar.lorebooks?.length) {
                 // Ensure lorebooks array exists in local manifest
