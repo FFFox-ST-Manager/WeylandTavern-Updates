@@ -45,7 +45,24 @@
 .wlm-chip[data-kind="ready"] { animation: wlm-fade-in 200ms ease-out, wlm-pulse-crimson 2s ease-in-out infinite; }
 .wlm-chip[data-kind="error"] { border-color: rgba(240, 100, 60, 0.7); animation: wlm-fade-in 200ms ease-out, wlm-pulse-amber 2s ease-in-out infinite; }
 .wlm-chip[data-kind="info"]  { opacity: 0.85; }
-.wlm-chip[data-kind="suggest"] { opacity: 0.75; border-style: dashed; }
+
+/* ── "TIME FOR AN LTM" BRAIN GLOW ──────────────────── */
+/* The passive nudge is no longer a floating chip — the brain button in the
+   quick-reply bar glows orange instead (class applied by applyBrainDue in
+   index.js). !important because the QR bar's own theme rules color icons
+   with higher-specificity selectors. */
+
+.qr--button.wlm-brain-due,
+.qr--button.wlm-brain-due .qr--button-icon {
+    color: #ff9d2e !important;
+}
+.qr--button.wlm-brain-due {
+    animation: wlm-brain-glow 2s ease-in-out infinite;
+}
+@keyframes wlm-brain-glow {
+    0%, 100% { text-shadow: 0 0 3px rgba(255, 157, 46, 0.35); }
+    50%      { text-shadow: 0 0 10px rgba(255, 157, 46, 0.8); }
+}
 
 /* ── MODAL FRAME ───────────────────────────────────── */
 
