@@ -881,7 +881,7 @@ This is our sort of rough approach of forcing down the LLM Niceness barrier with
         
         setLocalVariable("AnalysisLayer", strings.NorAnalysis);
 
-        if (getLocalVariable("SpecialThoughts") === "true") {
+        if (getLocalVariable("SpecialThoughts") === "true" || charName === "Vera") {
             await XXX();
         }
 
