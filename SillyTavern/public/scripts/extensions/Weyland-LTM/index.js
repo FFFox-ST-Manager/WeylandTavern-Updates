@@ -1,10 +1,25 @@
 // =====================================================================
 // Weyland-LTM — Long-Term Memory manager (v1.3.3)
 // =====================================================================
-// Async draft generation, editable draft window, reroll (regenerates from
+// Full-JS replacement for the STscript LTM pipeline (Sleep / LTMPrompt /
+// LTMDisabler / MemorySaver). Async draft generation, editable draft
+// window (with a dedicated editable title field), reroll (regenerates from
 // source when known, otherwise rewrites), pin, merge, bulk-select delete,
 // version history, backward-compat ingest of entries created by the old
 // system.
+//
+// Generation goes through ChatCompletionService (raw API call) rather
+// than the chat Generate() pipeline, so:
+//   - Weyland-Router's interceptor never fires on LTM calls (no pause
+//     dance needed)
+//   - streaming works into our own editor even when chat streaming is
+//     globally disabled
+//   - a per-call model override never touches the user's settings
+//
+// See README.md for the full architecture writeup (prompt structure,
+// storage format, the character-card POV tag convention) and
+// USER_GUIDE.md for the plain-language version to hand to end users.
+// =====================================================================
 
 import {
     loadWorldInfo,
@@ -13,11 +28,11 @@ import {
     createNewWorldInfo,
     METADATA_KEY,
     world_names,
-} from '../../world-info.js';
-import { oai_settings } from '../../openai.js';
-import { SlashCommand } from '../../slash-commands/SlashCommand.js';
-import { SlashCommandParser } from '../../slash-commands/SlashCommandParser.js';
-loadWorldInfo
+} from '../../../world-info.js';
+import { oai_settings } from '../../../openai.js';
+import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
+import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
+
 const ctx = SillyTavern.getContext();
 const {
     extensionSettings,
@@ -27,7 +42,7 @@ const {
 } = ctx;
 
 export const WLM_MODULE_NAME = 'Weyland-LTM';
-const EXT_VERSION = '1.3.3';
+const EXT_VERSION = '1.5.2';
 
 // Default LTM model out of the box for every fresh install. Lucky wants
 // Sonnet reserved for actual roleplay messaging rather than burned on LTM
@@ -49,14 +64,16 @@ const ALTERNATE_LTM_MODELS = ['minimax-m3', 'gemini-3-pro-preview'];
  * @property {boolean} debug
  * @property {string} modelOverride          // '' => use main chat model
  * @property {number} messagesBetweenLTMs    // suggestion cadence
+ * @property {number} summarizeSpan          // max messages per LTM; 0 = auto (match cadence)
  * @property {number} activeLTMCount         // how many stay constant-loaded before demotion
  * @property {number} maxVersionsPerEntry    // cap version history
  * @property {number} maxResponseTokens      // generation budget
  * @property {boolean} streamDrafts          // stream tokens into the editor
- * @property {boolean} suggestLTMs           // show "time for an LTM?" chip
+ * @property {boolean} suggestLTMs           // glow the brain button when due (off/semi modes only — full never glows)
+ * @property {'off'|'semi'|'full'} autoLtmMode // off = manual only; semi = auto-draft, manual approve; full = auto-draft AND auto-save
  * @property {'auto'|'first'|'third'} povMode // auto = 1st person solo / 3rd person for groups
  * @property {Object} __drafts               // per-chat unsaved editor state
- * @property {Object} __chatState            // per-chat { lastLtmMessageId }
+ * @property {Object} __chatState            // per-chat { lastLtmMessageId, lastAutoDraftMessageId, goalOverride }
  */
 
 /** @type {WeylandLTMSettings} */
@@ -65,11 +82,13 @@ const defaultSettings = {
     debug: false,
     modelOverride: RECOMMENDED_LTM_MODEL,
     messagesBetweenLTMs: 50,
+    summarizeSpan: 0,
     activeLTMCount: 3,
     maxVersionsPerEntry: 10,
     maxResponseTokens: 2000,
     streamDrafts: true,
     suggestLTMs: true,
+    autoLtmMode: 'off',
     povMode: 'auto',
     __drafts: {},
     __chatState: {},
@@ -170,6 +189,7 @@ function resolveGenerationModel() {
  * @property {string[]} versions
  * @property {{role:string, content:string}[]} [messagesOverride]  // set for merge/rewrite jobs instead of building fresh from `range`
  * @property {boolean} isFreshSummary       // true only for a from-scratch summary of new chat messages — gates recordLTMCoverage
+ * @property {boolean} [autoTriggered]       // created by maybeAutoTrigger (semi/full Auto-LTM), not a manual "+ New LTM" click
  * @property {{ firstMessageId:number, lastMessageId:number } | null} [sourceRangeForSave]  // persisted on the saved entry so a later reroll can regenerate from source
  * @property {string} [rewriteTargetUid]    // entry replaced on save
  * @property {string[]} [mergeSourceUids]   // entries consumed on save
@@ -297,18 +317,28 @@ function extractTimelineFromRange(firstMessageId, lastMessageId) {
     return timeline;
 }
 
+// On auto (summarizeSpan 0) "every N messages" is also the natural size for
+// a single memory, so the cadence doubles as the span; a manual
+// summarizeSpan overrides just that size, never the "skip what's already
+// covered" start point computed elsewhere.
+function resolveSummarizeSpan() {
+    const manualSpan = Math.floor(Number(settings.summarizeSpan) || 0);
+    return manualSpan > 0
+        ? Math.max(10, manualSpan)
+        : Math.max(10, Number(settings.messagesBetweenLTMs) || 50);
+}
+
 function computeRangeFromCurrentChat() {
     const chat = SillyTavern.getContext().chat || [];
     const last = chat.length - 1;
     const state = settings.__chatState[getCurrentChatId()];
-    // Start after the last message covered by a previous LTM, capped at the
-    // cadence setting. The cap matters most when no coverage was ever
-    // recorded — a fresh install on a long-running chat, or a chat whose
-    // only LTMs are legacy entries from the old STscript system (which
-    // never wrote __chatState) — where an uncapped range would ship the
-    // ENTIRE chat history to the model. "Every N messages" is also the
-    // natural size for a single memory, so the cadence doubles as the cap.
-    const span = Math.max(10, Number(settings.messagesBetweenLTMs) || 50);
+    // Start after the last message covered by a previous LTM, capped at a
+    // span. The cap matters most when no coverage was ever recorded — a
+    // fresh install on a long-running chat, or a chat whose only LTMs are
+    // legacy entries from the old STscript system (which never wrote
+    // __chatState) — where an uncapped range would ship the ENTIRE chat
+    // history to the model.
+    const span = resolveSummarizeSpan();
     let first = (state?.lastLtmMessageId ?? -1) + 1;
     if (last - first + 1 > span) first = last - span + 1;
     if (first > last) first = Math.max(0, last - span + 1);
@@ -340,11 +370,57 @@ function clearGoalOverride(chatId) {
     }
 }
 
-function recordLTMCoverage(lastMessageId) {
+function recordLTMCoverage(chatId, lastMessageId) {
     // Overwriting wholesale is intentional — a fresh summary resets the
     // cadence baseline, so any manual goal override should clear too.
-    settings.__chatState[getCurrentChatId()] = { lastLtmMessageId: lastMessageId };
+    // Keyed by the JOB's chatId, never the currently-open chat — the user is
+    // encouraged to keep chatting (even elsewhere) while a draft generates,
+    // so "current chat at save time" is not a safe assumption.
+    // lastAutoDraftMessageId is explicitly preserved through the wipe —
+    // it tracks a DIFFERENT cursor (see recordAutoDraftCoverage below) that
+    // must survive saving an out-of-order draft, otherwise a later auto-
+    // drafted-but-still-unsaved segment could get re-summarized from
+    // scratch by the next auto-trigger.
+    const prevAutoDraft = settings.__chatState[chatId]?.lastAutoDraftMessageId;
+    settings.__chatState[chatId] = {
+        lastLtmMessageId: lastMessageId,
+        ...(prevAutoDraft !== undefined ? { lastAutoDraftMessageId: prevAutoDraft } : {}),
+    };
     persistSettings();
+}
+
+// Auto-LTM (semi/full) tracks its OWN cursor, separate from lastLtmMessageId
+// (which only advances on an actual save). Semi-Auto drafts are meant to
+// STACK — each cap hit queues its own draft with its own span, whether or
+// not earlier drafts have been approved yet — so "has coverage advanced"
+// can't be answered by "has anything been saved". Without this cursor,
+// leaving several semi-auto drafts unapproved would make every subsequent
+// auto-trigger recompute the same starting point and re-summarize ground
+// an earlier (still-pending) draft already claimed.
+function getAutoTriggerCursor(chatId) {
+    const state = settings.__chatState[chatId];
+    return Math.max(state?.lastLtmMessageId ?? -1, state?.lastAutoDraftMessageId ?? -1);
+}
+
+function recordAutoDraftCoverage(chatId, lastMessageId) {
+    settings.__chatState[chatId] ??= {};
+    settings.__chatState[chatId].lastAutoDraftMessageId = lastMessageId;
+    persistSettings();
+}
+
+// Each auto segment is capped to exactly one span, even if far more than a
+// span's worth of new messages piled up since the cursor — that's what lets
+// a long absence produce several appropriately-sized stacked drafts (each
+// queued on a later updateChip pass, see maybeAutoTrigger) instead of one
+// giant summary swallowing everything at once.
+function computeNextAutoRange(chatId) {
+    const chat = SillyTavern.getContext().chat || [];
+    const last = chat.length - 1;
+    const span = resolveSummarizeSpan();
+    const cursor = getAutoTriggerCursor(chatId);
+    const first = cursor + 1;
+    const lastCapped = Math.min(last, cursor + span);
+    return { firstMessageId: Math.max(0, first), lastMessageId: Math.max(0, lastCapped) };
 }
 
 // =====================================================================
@@ -352,6 +428,14 @@ function recordLTMCoverage(lastMessageId) {
 // =====================================================================
 // Every prompt builder below returns a MESSAGE ARRAY, not a single string,
 // structured as a sandwich:
+//   1. system  — the ruleset (who, format, anti-hallucination, date handling)
+//   2. user    — the raw material (chat excerpt / existing entries)
+//   3. user    — a short, high-recency reminder sent LAST, right before
+//      generation, explicitly telling the model to stop roleplaying and
+//      produce the entry now. Models weight the most recent turn heaviest,
+//      so this is where "don't just think and then stop" belongs — burying
+//      it up in the system message with everything else was letting models
+//      wander off after a long <think> block and never actually answer.
 
 const THINKING_DISCIPLINE = `Keep any <think></think> reasoning SHORT — a handful of terse bullet points, not an essay. The instant you close </think>, continue in that SAME response with the actual output. Stopping after only the thinking block is a failure — you are not done until [END MEMORY ENTRY] (or the equivalent closing marker) has been written.`;
 
@@ -453,6 +537,7 @@ ${chatHistoryText}
 
 function buildMergePrompt(entryA, entryB) {
     const character = getCurrentCharacterName();
+    const user = getUserName();
     const systemMsg = `[MEMORY CONSOLIDATION SYSTEM]
 
 You are assisting with memory consolidation for the character "${character}". This is NOT a roleplay turn.
@@ -486,6 +571,7 @@ ${entryB.content}
 
 function buildRewritePrompt(entry) {
     const character = getCurrentCharacterName();
+    const user = getUserName();
     const systemMsg = `[MEMORY REWRITE SYSTEM]
 
 You are assisting with cleaning up an existing memory entry for the character "${character}". This is NOT a roleplay turn.
@@ -885,9 +971,22 @@ async function demoteExcessLTMs() {
 // DRAFT PERSISTENCE
 // =====================================================================
 
-function saveDraftState(chatId, text) {
+// How long an unsaved persisted draft survives before the sweep discards it.
+const DRAFT_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+
+function saveDraftState(chatId, text, job = null) {
     if (!text || !text.trim()) { discardDraftState(chatId); return; }
-    settings.__drafts[chatId] = { text, savedAt: Date.now() };
+    // The job's range/flags MUST travel with the draft text: a draft restored
+    // without `isFreshSummary` saves fine but never advances the coverage
+    // cursor, so the NEXT "+ New LTM" re-summarizes ground an earlier memory
+    // already covered (the "second LTM covered the whole RP again" bug).
+    settings.__drafts[chatId] = {
+        text,
+        savedAt: Date.now(),
+        range: job?.range ?? null,
+        sourceRangeForSave: job?.sourceRangeForSave ?? null,
+        isFreshSummary: job?.isFreshSummary === true,
+    };
     persistSettings();
 }
 
@@ -900,6 +999,20 @@ function discardDraftState(chatId) {
         delete settings.__drafts[chatId];
         persistSettings();
     }
+}
+
+// Drafts keyed by a chat id that no longer resolves (renamed/deleted chats)
+// would otherwise sit in settings forever. Age is the only reliable signal
+// we have for "orphaned", so anything past the TTL gets dropped at startup.
+function sweepStaleDrafts() {
+    let changed = false;
+    for (const [chatId, draft] of Object.entries(settings.__drafts || {})) {
+        if (!draft?.text?.trim() || (Date.now() - (draft.savedAt || 0)) > DRAFT_TTL_MS) {
+            delete settings.__drafts[chatId];
+            changed = true;
+        }
+    }
+    if (changed) persistSettings();
 }
 
 // =====================================================================
@@ -953,26 +1066,162 @@ function hideChip() {
     document.getElementById(CHIP_ID)?.classList.add('wlm-chip-hidden');
 }
 
+// The passive "time for an LTM?" nudge used to be a chip too, but a floating
+// flag is easy to miss on desktop and eats real screen space on mobile.
+// Instead, the brain QR button itself glows orange when a memory is due —
+// zero extra pixels, visible on every layout. The QR bar re-renders itself
+// on its own schedule (chat changes, QR set swaps), which wipes our class,
+// so this is written to be cheaply re-applied from updateChip() every time.
+const BRAIN_DUE_CLASS = 'wlm-brain-due';
+const BRAIN_DUE_TITLE = 'Time for an LTM! 🧠';
+let brainDueState = false;
+
+function applyBrainDue(due) {
+    brainDueState = due;
+    watchQrBarForBrain();
+    for (const btn of document.querySelectorAll('.qr--button')) {
+        if (!btn.querySelector('.fa-brain')) continue;
+        btn.classList.toggle(BRAIN_DUE_CLASS, due);
+        const el = /** @type {HTMLElement} */ (btn);
+        if (due) {
+            if (el.dataset.wlmTitle === undefined) el.dataset.wlmTitle = el.title;
+            el.title = BRAIN_DUE_TITLE;
+        } else if (el.dataset.wlmTitle !== undefined) {
+            el.title = el.dataset.wlmTitle;
+            delete el.dataset.wlmTitle;
+        }
+    }
+}
+
+// Re-assert the glow after the QR bar rebuilds its buttons (which discards
+// our class). Watching childList on the bar container is enough — QR v2
+// replaces button nodes wholesale rather than mutating them in place. The
+// bar may not exist yet at extension init, so this attaches lazily from
+// applyBrainDue and re-attaches if the bar node itself was ever replaced.
+let observedQrBar = null;
+function watchQrBarForBrain() {
+    const bar = document.getElementById('qr--bar');
+    if (!bar || bar === observedQrBar) return;
+    observedQrBar = bar;
+    new MutationObserver(() => {
+        // Only touch the DOM when a brain button is missing its state —
+        // applyBrainDue itself triggers no childList mutations, so no loop.
+        applyBrainDue(brainDueState);
+    }).observe(bar, { childList: true, subtree: true });
+}
+
+// =====================================================================
+// AUTO-LTM (semi/full)
+// =====================================================================
+// Three modes, settings.autoLtmMode:
+//   'off'  (default) — nothing automatic. Brain glows when due; user opens
+//           the panel and clicks "+ New LTM" themselves, same as always.
+//   'semi' — the moment the cadence cap is hit, a draft is generated in the
+//           background automatically, but it's never written to the
+//           lorebook without the user opening it and hitting Save. The
+//           brain keeps glowing throughout (cap-hit AND draft-ready both
+//           read to the user as "there's an LTM waiting on you").
+//   'full' — same auto-generation, but the draft is saved the instant it
+//           passes validation, with zero manual step. The brain never
+//           glows in this mode (nothing is ever waiting on the user); the
+//           only feedback is the existing transient "generating…" chip.
+// Rerolling an unsaved auto-drafted job (semi mode) reuses job.range
+// unchanged, same as any other job-kind reroll — so "come back 300
+// messages later and reroll" still regenerates from the ORIGINAL span,
+// never a recomputed/grown one. See onRerollClicked.
+
+async function autoSaveJob(job) {
+    try {
+        const check = validateLTMShape(job.draft);
+        if (!check.ok) {
+            toast('warning', `Auto-LTM draft failed validation (${check.reason}) — left for manual review`);
+            return false;
+        }
+        await saveLTMEntry({
+            title: extractTitleFromDraft(job.draft),
+            content: job.draft,
+            sourceRange: job.sourceRangeForSave ?? null,
+        });
+        if (job.isFreshSummary) recordLTMCoverage(job.chatId, job.range.lastMessageId);
+        jobs.delete(job.id);
+        discardDraftState(job.chatId);
+        await demoteExcessLTMs();
+        toast('success', 'LTM auto-saved 🧠');
+        return true;
+    } catch (err) {
+        ltmWarn('auto-save failed', err);
+        toast('error', `Auto-LTM save failed: ${err?.message ?? err}`);
+        return false;
+    }
+}
+
+async function runAutoJob(job) {
+    await generateDraft(job);
+    if (job.status === 'ready' && settings.autoLtmMode === 'full') {
+        await autoSaveJob(job);
+    }
+    updateChip();
+    refreshSidebar();
+}
+
+// Called on every updateChip() pass (chat change, message received, and —
+// importantly — runAutoJob's own completion). Uses the auto-draft cursor
+// (getAutoTriggerCursor), NOT "does any job already exist for this chat" —
+// semi-auto drafts are meant to STACK, so a second cap hit while an earlier
+// draft is still unapproved must queue its OWN segment, not get swallowed
+// by an "already have something pending" guard. The only thing that DOES
+// block a new trigger is an in-flight generation: segments are produced one
+// at a time, never concurrently. If the cursor is still behind after one
+// finishes, runAutoJob's own updateChip() call re-enters this function and
+// queues the next segment — a long absence cascades through several
+// appropriately-sized drafts instead of firing them all at once or losing
+// everything past the first.
+function maybeAutoTrigger(chatJobs) {
+    if (settings.autoLtmMode === 'off' || !settings.enabled) return;
+    const chatId = getCurrentChatId();
+    const chat = SillyTavern.getContext().chat || [];
+    if (chat.length < 2) return;
+    if (chatJobs.some(j => j.status === 'generating' || j.status === 'queued')) return;
+    const span = resolveSummarizeSpan();
+    const cursor = getAutoTriggerCursor(chatId);
+    if ((chat.length - 1) - cursor < span) return; // not enough new ground since the last auto/saved segment
+    const range = computeNextAutoRange(chatId);
+    // Advance the cursor immediately (before the async generation even
+    // starts) so a rapid second updateChip() call in the same tick can't
+    // queue an overlapping segment for the same messages.
+    recordAutoDraftCoverage(chatId, range.lastMessageId);
+    const job = createJob(chatId, range, { isFreshSummary: true, sourceRangeForSave: range, autoTriggered: true });
+    runAutoJob(job); // async on purpose — don't block updateChip's caller
+}
+
 // Priority order matters here (checked top to bottom, first match wins):
 // an in-flight generation is the most actionable thing to tell the user
-// about, then a ready draft, then a failure, and only if none of those
-// apply do we fall back to the passive "you might want to make one of
-// these" nudge. Doesn't matter how stale the suggestion is — an active job
-// always takes precedence over it.
+// about, then a ready draft, then a failure. The passive "you might want
+// to make one of these" nudge is the brain-button glow, and it only shows
+// when no job chip is up — an active job always takes precedence.
 function updateChip() {
-    if (!settings.enabled) return hideChip();
+    if (!settings.enabled) { applyBrainDue(false); return hideChip(); }
     const chatJobs = getJobsForChat(getCurrentChatId());
-    const ready = chatJobs.filter(j => j.status === 'ready').length;
+    maybeAutoTrigger(chatJobs);
+
+    const readyJobs = chatJobs.filter(j => j.status === 'ready');
+    // An auto-triggered ready draft in semi mode reuses the brain glow
+    // instead of the "draft ready" chip — from the user's side, "there's an
+    // LTM waiting for your approval" IS "time for an LTM". A manually
+    // clicked "+ New LTM" always gets the normal ready chip regardless of
+    // autoLtmMode, since the user is already looking right at it.
+    const autoReady = readyJobs.filter(j => j.autoTriggered);
+    const manualReady = readyJobs.filter(j => !j.autoTriggered);
     const failed = chatJobs.filter(j => j.status === 'failed').length;
     const generating = chatJobs.filter(j => j.status === 'generating').length;
 
-    if (generating) return setChip('🧠 LTM generating…', 'info');
-    if (ready) return setChip(`📝 ${ready} LTM draft${ready > 1 ? 's' : ''} ready`, 'ready');
-    if (failed) return setChip('⚠️ LTM failed — click to reroll', 'error');
+    if (generating) { applyBrainDue(false); return setChip('🧠 LTM generating…', 'info'); }
+    if (manualReady.length) { applyBrainDue(false); return setChip(`📝 ${manualReady.length} LTM draft${manualReady.length > 1 ? 's' : ''} ready`, 'ready'); }
+    if (autoReady.length && settings.autoLtmMode === 'semi') { applyBrainDue(true); return hideChip(); }
+    if (failed) { applyBrainDue(false); return setChip('⚠️ LTM failed — click to reroll', 'error'); }
     const chat = SillyTavern.getContext().chat || [];
-    if (settings.suggestLTMs && (chat.length - 1) >= getEffectiveGoal()) {
-        return setChip('💭 Time for an LTM?', 'suggest');
-    }
+    const due = settings.suggestLTMs && (chat.length - 1) >= getEffectiveGoal();
+    applyBrainDue(settings.autoLtmMode !== 'full' && due);
     hideChip();
 }
 
@@ -1047,9 +1296,13 @@ function buildModalHtml() {
           </div>
           <small class="wlm-recommend-disclaimer">Lucky does not recommend Sonnet for LTM generation. Instead, use glm-4.7-thinking and gemini-3-pro-preview whenever possible. This ensures our Sonnet supply is used for actual messaging rather than LTM requests.</small>
         </label>
-        <label class="wlm-field" title="How many new messages should pass before the 'Time for an LTM?' reminder chip appears. Also sets the default range size for a new draft.">
+        <label class="wlm-field" title="How many new messages should pass before the brain icon lights up to suggest a new LTM. On Auto below, this also sets how many messages go into each memory.">
           <span>Suggest an LTM every N messages</span>
           <input id="wlm-set-cadence" type="number" min="10" step="10" />
+        </label>
+        <label class="wlm-field" title="How many recent messages get summarized into a new LTM. Auto matches the cadence above. Messages already covered by a previous memory are always skipped either way.">
+          <span>Messages summarized per LTM <small>(blank or 0 = Auto, recommended)</small></span>
+          <input id="wlm-set-span" type="number" min="0" step="10" placeholder="Auto" />
         </label>
         <label class="wlm-field" title="How many recent memories stay permanently loaded in context at once. Older ones switch to semantic-search-only (vectorized) instead of disappearing — pinned memories are always exempt.">
           <span>Active (always-loaded) LTMs — older ones get vectorized <small>(recommended: 3)</small></span>
@@ -1063,9 +1316,18 @@ function buildModalHtml() {
           <input id="wlm-set-stream" type="checkbox" />
           <span>Stream drafts into the editor</span>
         </label>
-        <label class="wlm-field wlm-check" title="A gentle nudge chip that appears once enough new messages have piled up since the last saved memory.">
+        <label class="wlm-field wlm-check" title="Once enough new messages pile up since the last saved memory, the brain button in the quick-reply bar glows orange as a gentle nudge. Only applies in Off/Semi-Auto below — Full-Auto never needs your attention.">
           <input id="wlm-set-suggest" type="checkbox" />
-          <span>Show "Time for an LTM?" reminders</span>
+          <span>Glow the 🧠 button when it's time for an LTM</span>
+        </label>
+        <label class="wlm-field" title="Off: nothing automatic, you click '+ New LTM' yourself. Semi-Auto: a draft is generated in the background the moment you hit your cap, but it still needs your Save. Full-Auto: same background generation, but it saves itself the instant it passes validation — no review step.">
+          <span>Auto-LTM</span>
+          <select id="wlm-set-automode">
+            <option value="off">Off — generate manually (default)</option>
+            <option value="semi">Semi-Auto — auto-draft, you approve</option>
+            <option value="full">Full-Auto — auto-draft and auto-save</option>
+          </select>
+          <small>Semi-Auto still glows the 🧠 button once a draft is ready for your review. Full-Auto never glows — watch for the brief "LTM generating…" flag instead.</small>
         </label>
         <label class="wlm-field" title="Controls whether memories are written as the character's own diary entry (1st person) or as a neutral, uncharacterized account (3rd person).">
           <span>Narrative point of view</span>
@@ -1139,6 +1401,7 @@ function injectModal() {
     // Settings inputs → live-save on change
     bindSetting('wlm-set-model', 'modelOverride', v => String(v || '').trim());
     bindSetting('wlm-set-cadence', 'messagesBetweenLTMs', v => Math.max(10, Number(v) || 50));
+    bindSetting('wlm-set-span', 'summarizeSpan', v => Math.max(0, Math.floor(Number(v) || 0)));
     bindSetting('wlm-set-active', 'activeLTMCount', v => Math.max(0, Number(v) || 3));
     bindSetting('wlm-set-maxtokens', 'maxResponseTokens', v => Math.max(500, Number(v) || 2000));
     bindSetting('wlm-set-stream', 'streamDrafts', null, true);
@@ -1146,8 +1409,10 @@ function injectModal() {
     bindSetting('wlm-set-debug', 'debug', null, true);
     bindSetting('wlm-set-enabled', 'enabled', null, true);
     bindSetting('wlm-set-povmode', 'povMode', v => (['first', 'third'].includes(v) ? v : 'auto'));
+    bindSetting('wlm-set-automode', 'autoLtmMode', v => (['semi', 'full'].includes(v) ? v : 'off'));
     document.getElementById('wlm-set-enabled').addEventListener('change', () => updateChip());
     document.getElementById('wlm-set-cadence').addEventListener('change', () => { renderProgress(); updateChip(); });
+    document.getElementById('wlm-set-automode').addEventListener('change', () => updateChip());
 
     setupDragging();
 
@@ -1174,6 +1439,8 @@ function loadSettingsIntoForm() {
     const check = (id, val) => { const el = /** @type {HTMLInputElement} */ (document.getElementById(id)); if (el) el.checked = !!val; };
     set('wlm-set-model', settings.modelOverride || '');
     set('wlm-set-cadence', settings.messagesBetweenLTMs);
+    // 0 means Auto — show the placeholder instead of a literal "0".
+    set('wlm-set-span', settings.summarizeSpan > 0 ? settings.summarizeSpan : '');
     set('wlm-set-active', settings.activeLTMCount);
     set('wlm-set-maxtokens', settings.maxResponseTokens);
     check('wlm-set-stream', settings.streamDrafts);
@@ -1181,6 +1448,7 @@ function loadSettingsIntoForm() {
     check('wlm-set-debug', settings.debug);
     check('wlm-set-enabled', settings.enabled);
     set('wlm-set-povmode', settings.povMode || 'auto');
+    set('wlm-set-automode', settings.autoLtmMode || 'off');
 }
 
 /**
@@ -1305,7 +1573,15 @@ async function openPanel() {
     } else {
         const draft = loadDraftState(chatId);
         if (draft?.text) {
-            const job = createJob(chatId, computeRangeFromCurrentChat());
+            // Rebuild the job from what the draft actually covered, not from
+            // the current chat — and keep its fresh-summary flag so saving it
+            // still advances the coverage cursor. (Drafts persisted by older
+            // versions carry no range/flags; those fall back to the old
+            // recompute-and-don't-advance behavior.)
+            const job = createJob(chatId, draft.range ?? computeRangeFromCurrentChat(), {
+                isFreshSummary: draft.isFreshSummary === true,
+                sourceRangeForSave: draft.sourceRangeForSave ?? null,
+            });
             job.status = 'ready';
             job.draft = draft.text;
             selectJob(job);
@@ -1321,10 +1597,13 @@ function closePanel() {
     if (!overlay) return;
     overlay.style.display = 'none';
     overlay.style.pointerEvents = 'none';
-    // Persist unsaved editor text so nothing is lost on close.
+    // Persist unsaved editor text so nothing is lost on close — keyed by the
+    // JOB's chat (not whatever chat happens to be open) and carrying the
+    // job's range/flags so a later restore behaves like the original job.
     if (selectedRef.current?.kind === 'job') {
+        const job = selectedRef.current.job;
         const editor = /** @type {HTMLTextAreaElement} */ (document.getElementById('wlm-editor-body'));
-        saveDraftState(getCurrentChatId(), editor?.value ?? '');
+        saveDraftState(job.chatId, editor?.value ?? '', job);
     }
 }
 
@@ -1704,7 +1983,7 @@ async function onSaveClicked() {
             // Only from-scratch summaries of new messages advance chat
             // coverage — merges and rewrites/regenerations of old entries
             // don't cover new ground and must NOT move the cursor backward.
-            if (job.isFreshSummary) recordLTMCoverage(job.range.lastMessageId);
+            if (job.isFreshSummary) recordLTMCoverage(job.chatId, job.range.lastMessageId);
             jobs.delete(job.id);
             discardDraftState(job.chatId);
         } else if (selectedRef.current?.kind === 'entry') {
@@ -1750,16 +2029,24 @@ function setEntryChecked(entry, rowEl, checked) {
 async function onMergeClicked() {
     if (checkedEntries.size !== 2) return;
     const [a, b] = [...checkedEntries.values()];
-    const job = createJob(getCurrentChatId(), null, {
-        messagesOverride: buildMergePrompt(a, b),
-        isFreshSummary: false,
-        sourceRangeForSave: unionSourceRange(a.sourceRange, b.sourceRange),
-        mergeSourceUids: [a.uid, b.uid],
-    });
-    checkedEntries.clear();
-    await refreshSidebar();
-    selectJob(job);
-    generateDraft(job);
+    try {
+        const job = createJob(getCurrentChatId(), null, {
+            messagesOverride: buildMergePrompt(a, b),
+            isFreshSummary: false,
+            sourceRangeForSave: unionSourceRange(a.sourceRange, b.sourceRange),
+            mergeSourceUids: [a.uid, b.uid],
+        });
+        checkedEntries.clear();
+        await refreshSidebar();
+        selectJob(job);
+        generateDraft(job);
+    } catch (err) {
+        // A throw here (e.g. from a prompt builder) used to fail completely
+        // silently — the click registered but nothing visible happened,
+        // since nothing downstream of the throw ever ran. Surface it.
+        ltmWarn('merge failed', err);
+        toast('error', `Could not start merge: ${err?.message ?? err}`);
+    }
 }
 
 async function onBulkDeleteClicked() {
@@ -1840,6 +2127,7 @@ function addWandMenuItem() {
 (function init() {
     try {
         loadSettings();
+        sweepStaleDrafts();
         ensureChip();
         registerSlashCommands();
         addWandMenuItem();
