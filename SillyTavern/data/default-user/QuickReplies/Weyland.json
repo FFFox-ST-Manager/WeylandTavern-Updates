@@ -953,7 +953,7 @@
             "message": "/qr-chat-set-on visible=true Chat |\n/:\"Chat.ChatChange\"",
             "contextList": [],
             "preventAutoExecute": true,
-            "isHidden": false,
+            "isHidden": true,
             "executeOnStartup": false,
             "executeOnUser": false,
             "executeOnAi": false,
