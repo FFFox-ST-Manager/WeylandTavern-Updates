@@ -48,6 +48,11 @@ const defaultSettings = {
     suppressApiErrors: true
 };
 
+// Hard floors for user-configurable timing. A sub-minute timeout or cooldown
+// makes the router fail every model continuously, so nothing may go below 1 min.
+const MIN_TIMEOUT_MS = 60 * 1000;   // 1 minute
+const MIN_COOLDOWN_MS = 60 * 1000;  // 1 minute
+
 /** @type {WeylandRouterSettings} */
 let settings = undefined;
 
@@ -175,9 +180,16 @@ function getSettings() {
     // Users who set an explicit non-default value keep their setting.
     if (settings.cooldownMs === 10 * 60 * 1000) settings.cooldownMs = defaultSettings.cooldownMs;
     if (!['random', 'priority'].includes(settings.routingMode)) settings.routingMode = defaultSettings.routingMode;
+    // Enforce floors. Sub-minute timeouts/cooldowns cause every model to fail
+    // continuously (e.g. a 1-second timeout kills any real generation), so clamp
+    // any saved value below the minimum back up to 1 minute.
+    if (!(settings.timeoutMs >= MIN_TIMEOUT_MS)) settings.timeoutMs = Math.max(MIN_TIMEOUT_MS, defaultSettings.timeoutMs);
+    if (!(settings.cooldownMs >= MIN_COOLDOWN_MS)) settings.cooldownMs = Math.max(MIN_COOLDOWN_MS, defaultSettings.cooldownMs);
     settings.pool.forEach(model => {
         if (model.profileName === undefined) model.profileName = '';
         if (model.timeoutMs === undefined) model.timeoutMs = null;
+        // Per-route timeouts are opt-in (null = use global); clamp any set value up to the floor.
+        if (model.timeoutMs !== null && model.timeoutMs < MIN_TIMEOUT_MS) model.timeoutMs = MIN_TIMEOUT_MS;
         if (model.extendedCooldownUntil === undefined) model.extendedCooldownUntil = null;
         if (!Array.isArray(model.failureHistory)) model.failureHistory = [];
     });
@@ -276,7 +288,8 @@ function setModelTimeout(routeKey, seconds) {
     const target = settings.pool.find(m => getRouteKey(m) === routeKey);
     if (!target) return;
     const parsed = Number(seconds);
-    target.timeoutMs = Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed * 1000) : null;
+    // Blank/invalid → null (use the global timeout). Any real value is clamped up to the 1-minute floor.
+    target.timeoutMs = Number.isFinite(parsed) && parsed > 0 ? Math.max(MIN_TIMEOUT_MS, Math.round(parsed * 1000)) : null;
     saveSettingsDebounced();
 }
 
@@ -996,7 +1009,7 @@ function buildPoolHtml() {
             <div class="wtr-model-name" title="${escapeHtml(label)}">${escapeHtml(label)}${strikeBadge}</div>
             ${metric}
             <span class="wtr-pct">${isPriorityMode ? '' : '%'}</span>
-            <input class="wtr-route-timeout-input" type="number" min="1" max="600" step="1" value="${timeoutSeconds}" placeholder="${Math.round(settings.timeoutMs / 1000)}" data-model="${escapeHtml(routeKey)}" title="Per-route timeout in seconds. Leave blank to use the global Timeout setting.">
+            <input class="wtr-route-timeout-input" type="number" min="60" max="600" step="1" value="${timeoutSeconds}" placeholder="${Math.round(settings.timeoutMs / 1000)}" data-model="${escapeHtml(routeKey)}" title="Per-route timeout in seconds (minimum 60). Leave blank to use the global Timeout setting.">
             ${moveButtons}
             <button class="wtr-btn-icon wtr-clear-cd ${extended ? 'wtr-clear-cd-ext' : ''}" data-model="${escapeHtml(routeKey)}" title="${clearTitle}" ${clearDisabled ? 'disabled' : ''}>↻</button>
             <button class="wtr-btn-icon wtr-remove" data-model="${escapeHtml(routeKey)}" title="Remove this route from the pool">✕</button>
@@ -1166,10 +1179,10 @@ function buildModalHtml() {
 
         <div class="wtr-timing-row" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
           <label title="Default wait time before Router decides a model is stuck. Individual routes can override this in the pool." style="color:#888;font-size:11px;display:flex;align-items:center;gap:5px;">
-            Timeout <input id="wtr-timeout" title="Seconds to wait before failing over to another model." type="number" min="1" max="300" value="${settings.timeoutMs/1000}" class="wtr-num-input"> s
+            Timeout <input id="wtr-timeout" title="Seconds to wait before failing over to another model. Minimum 60." type="number" min="60" max="300" value="${settings.timeoutMs/1000}" class="wtr-num-input"> s
           </label>
           <label title="How long a failed model is skipped before Router allows it to be rolled again." style="color:#888;font-size:11px;display:flex;align-items:center;gap:5px;">
-            Cooldown <input id="wtr-cooldown" title="Minutes a failed model stays out of rotation." type="number" min="0.1" max="60" step="0.1" value="${(settings.cooldownMs/60000).toFixed(1)}" class="wtr-num-input"> min
+            Cooldown <input id="wtr-cooldown" title="Minutes a failed model stays out of rotation. Minimum 1." type="number" min="1" max="60" step="0.1" value="${(settings.cooldownMs/60000).toFixed(1)}" class="wtr-num-input"> min
           </label>
           <button id="wtr-clear-all-cd" class="wtr-btn-sm" title="Clear every model cooldown immediately.">Reset CDs</button>
         </div>
@@ -1459,7 +1472,8 @@ function injectModal() {
     // timeout
     document.getElementById('wtr-timeout').addEventListener('change', e => {
         const v = parseFloat(/** @type {HTMLInputElement} */ (e.target).value);
-        if (!isNaN(v) && v >= 1) { settings.timeoutMs = Math.round(v * 1000); saveSettingsDebounced(); }
+        if (!isNaN(v) && v >= 1) { settings.timeoutMs = Math.max(MIN_TIMEOUT_MS, Math.round(v * 1000)); saveSettingsDebounced(); }
+        /** @type {HTMLInputElement} */ (e.target).value = String(settings.timeoutMs / 1000);
     });
 
     document.getElementById('wtr-routing-mode').addEventListener('change', e => {
@@ -1472,7 +1486,8 @@ function injectModal() {
     // cooldown
     document.getElementById('wtr-cooldown').addEventListener('change', e => {
         const v = parseFloat(/** @type {HTMLInputElement} */ (e.target).value);
-        if (!isNaN(v) && v >= 0.1) { settings.cooldownMs = Math.round(v * 60000); saveSettingsDebounced(); }
+        if (!isNaN(v) && v >= 1) { settings.cooldownMs = Math.max(MIN_COOLDOWN_MS, Math.round(v * 60000)); saveSettingsDebounced(); }
+        /** @type {HTMLInputElement} */ (e.target).value = (settings.cooldownMs / 60000).toFixed(1);
     });
 
     // clear all cooldowns
