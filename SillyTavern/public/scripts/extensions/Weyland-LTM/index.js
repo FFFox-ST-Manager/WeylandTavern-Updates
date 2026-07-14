@@ -42,7 +42,7 @@ const {
 } = ctx;
 
 export const WLM_MODULE_NAME = 'Weyland-LTM';
-const EXT_VERSION = '1.5.2';
+const EXT_VERSION = '1.5.4';
 
 // Default LTM model out of the box for every fresh install. Lucky wants
 // Sonnet reserved for actual roleplay messaging rather than burned on LTM
@@ -69,7 +69,7 @@ const ALTERNATE_LTM_MODELS = ['minimax-m3', 'gemini-3-pro-preview'];
  * @property {number} maxVersionsPerEntry    // cap version history
  * @property {number} maxResponseTokens      // generation budget
  * @property {boolean} streamDrafts          // stream tokens into the editor
- * @property {boolean} suggestLTMs           // glow the brain button when due (off/semi modes only — full never glows)
+ * @property {boolean} suggestLTMs           // show the "Time for an LTM?" chip when due (Off mode only — Semi/Full auto-trigger instead)
  * @property {'off'|'semi'|'full'} autoLtmMode // off = manual only; semi = auto-draft, manual approve; full = auto-draft AND auto-save
  * @property {'auto'|'first'|'third'} povMode // auto = 1st person solo / 3rd person for groups
  * @property {Object} __drafts               // per-chat unsaved editor state
@@ -1044,87 +1044,93 @@ function renderVersionPicker(job) {
 
 const CHIP_ID = 'wlm-chip';
 
+// Auto-hide after this long even if the user never touches it — the old
+// "suggest" chip used to just sit there indefinitely, which was the exact
+// complaint: too easy to miss on desktop (tiny, top-right corner) and too
+// persistent on mobile (ate screen space and wouldn't go away). Tapping it
+// dismisses it immediately either way.
+const CHIP_AUTO_HIDE_MS = 60 * 1000;
+let chipHideTimer = null;
+let chipShown = null; // {text, kind} currently on screen — lets repeated calls no-op instead of resetting the clock
+// Text of a chip the user tapped to dismiss. A tapped nudge ("Time for an
+// LTM?", "LTM ready for approval") must stay gone even though its underlying
+// condition is still true and updateChip() keeps re-requesting it on every
+// message — otherwise it would just pop straight back on top of the panel
+// the tap opened. Cleared once a genuinely different message wants the chip,
+// or when the condition lapses entirely (hideChip via updateChip's
+// fall-through), so the SAME nudge can legitimately return later.
+let chipDismissedText = null;
+
 function ensureChip() {
     if (document.getElementById(CHIP_ID)) return;
     const chip = document.createElement('div');
     chip.id = CHIP_ID;
     chip.className = 'wlm-chip wlm-chip-hidden';
     chip.title = 'Weyland-LTM';
-    chip.addEventListener('click', () => openPanel());
+    chip.addEventListener('click', () => {
+        // Remember what was tapped so setChip() won't immediately re-show it.
+        chipDismissedText = chipShown?.text ?? null;
+        hideChipEl();
+        openPanel();
+    });
     document.body.appendChild(chip);
 }
 
 function setChip(text, kind) {
     ensureChip();
+    // Suppressed: user tapped this exact message and it hasn't changed.
+    if (text === chipDismissedText) { hideChipEl(); return; }
+    // Any showable message different from the dismissed one supersedes it.
+    chipDismissedText = null;
     const chip = document.getElementById(CHIP_ID);
     chip.textContent = text;
     chip.dataset.kind = kind;
     chip.classList.remove('wlm-chip-hidden');
-}
-
-function hideChip() {
-    document.getElementById(CHIP_ID)?.classList.add('wlm-chip-hidden');
-}
-
-// The passive "time for an LTM?" nudge used to be a chip too, but a floating
-// flag is easy to miss on desktop and eats real screen space on mobile.
-// Instead, the brain QR button itself glows orange when a memory is due —
-// zero extra pixels, visible on every layout. The QR bar re-renders itself
-// on its own schedule (chat changes, QR set swaps), which wipes our class,
-// so this is written to be cheaply re-applied from updateChip() every time.
-const BRAIN_DUE_CLASS = 'wlm-brain-due';
-const BRAIN_DUE_TITLE = 'Time for an LTM! 🧠';
-let brainDueState = false;
-
-function applyBrainDue(due) {
-    brainDueState = due;
-    watchQrBarForBrain();
-    for (const btn of document.querySelectorAll('.qr--button')) {
-        if (!btn.querySelector('.fa-brain')) continue;
-        btn.classList.toggle(BRAIN_DUE_CLASS, due);
-        const el = /** @type {HTMLElement} */ (btn);
-        if (due) {
-            if (el.dataset.wlmTitle === undefined) el.dataset.wlmTitle = el.title;
-            el.title = BRAIN_DUE_TITLE;
-        } else if (el.dataset.wlmTitle !== undefined) {
-            el.title = el.dataset.wlmTitle;
-            delete el.dataset.wlmTitle;
-        }
+    // Only (re)start the auto-hide timer for a genuinely NEW notification.
+    // updateChip() fires on every incoming message — if a still-true
+    // condition (e.g. "due") kept resetting the clock on every call, the
+    // chip would never actually time out, which defeats the whole point.
+    const isNew = !chipShown || chipShown.text !== text || chipShown.kind !== kind;
+    if (isNew) {
+        chipShown = { text, kind };
+        clearTimeout(chipHideTimer);
+        chipHideTimer = setTimeout(hideChipEl, CHIP_AUTO_HIDE_MS);
     }
 }
 
-// Re-assert the glow after the QR bar rebuilds its buttons (which discards
-// our class). Watching childList on the bar container is enough — QR v2
-// replaces button nodes wholesale rather than mutating them in place. The
-// bar may not exist yet at extension init, so this attaches lazily from
-// applyBrainDue and re-attaches if the bar node itself was ever replaced.
-let observedQrBar = null;
-function watchQrBarForBrain() {
-    const bar = document.getElementById('qr--bar');
-    if (!bar || bar === observedQrBar) return;
-    observedQrBar = bar;
-    new MutationObserver(() => {
-        // Only touch the DOM when a brain button is missing its state —
-        // applyBrainDue itself triggers no childList mutations, so no loop.
-        applyBrainDue(brainDueState);
-    }).observe(bar, { childList: true, subtree: true });
+// Hide the element without forgetting a pending dismissal — used by the tap
+// handler and the auto-hide timer, so a dismissed-but-still-true nudge stays
+// suppressed rather than resurfacing on the next updateChip() pass.
+function hideChipEl() {
+    document.getElementById(CHIP_ID)?.classList.add('wlm-chip-hidden');
+    clearTimeout(chipHideTimer);
+    chipHideTimer = null;
+    chipShown = null;
+}
+
+// Full hide: also clears the dismissal, so once the condition genuinely
+// lapses (updateChip's no-notification fall-through) the same nudge is free
+// to return the next time it becomes true.
+function hideChip() {
+    hideChipEl();
+    chipDismissedText = null;
 }
 
 // =====================================================================
 // AUTO-LTM (semi/full)
 // =====================================================================
 // Three modes, settings.autoLtmMode:
-//   'off'  (default) — nothing automatic. Brain glows when due; user opens
+//   'off'  (default) — nothing automatic. Chip nudges when due; user opens
 //           the panel and clicks "+ New LTM" themselves, same as always.
 //   'semi' — the moment the cadence cap is hit, a draft is generated in the
 //           background automatically, but it's never written to the
-//           lorebook without the user opening it and hitting Save. The
-//           brain keeps glowing throughout (cap-hit AND draft-ready both
-//           read to the user as "there's an LTM waiting on you").
+//           lorebook without the user opening it and hitting Save. The chip
+//           tracks progress: "Drafting an LTM…" while generating, then
+//           "LTM ready for approval" once it's waiting on the user.
 //   'full' — same auto-generation, but the draft is saved the instant it
-//           passes validation, with zero manual step. The brain never
-//           glows in this mode (nothing is ever waiting on the user); the
-//           only feedback is the existing transient "generating…" chip.
+//           passes validation, with zero manual step. The chip just shows
+//           "Generating LTM…" and disappears — nothing is ever left
+//           waiting on the user in this mode.
 // Rerolling an unsaved auto-drafted job (semi mode) reuses job.range
 // unchanged, same as any other job-kind reroll — so "come back 300
 // messages later and reroll" still regenerates from the ORIGINAL span,
@@ -1194,34 +1200,41 @@ function maybeAutoTrigger(chatJobs) {
     runAutoJob(job); // async on purpose — don't block updateChip's caller
 }
 
-// Priority order matters here (checked top to bottom, first match wins):
-// an in-flight generation is the most actionable thing to tell the user
-// about, then a ready draft, then a failure. The passive "you might want
-// to make one of these" nudge is the brain-button glow, and it only shows
-// when no job chip is up — an active job always takes precedence.
+// Priority order matters here (checked top to bottom, first match wins): an
+// in-flight generation is the most actionable thing to tell the user about,
+// then a ready draft, then a failure, and only if none of those apply do we
+// fall back to the passive "you might want to make one of these" nudge.
+// Manual jobs (a real "+ New LTM" click) always get their own distinct text
+// from auto-triggered ones, since the user driving a manual job is already
+// looking right at the panel and doesn't need the same "hey, look over
+// here" framing an unattended background draft does.
 function updateChip() {
-    if (!settings.enabled) { applyBrainDue(false); return hideChip(); }
-    const chatJobs = getJobsForChat(getCurrentChatId());
+    if (!settings.enabled) return hideChip();
+    let chatJobs = getJobsForChat(getCurrentChatId());
     maybeAutoTrigger(chatJobs);
+    chatJobs = getJobsForChat(getCurrentChatId()); // re-fetch: maybeAutoTrigger may have just queued one this same tick
 
-    const readyJobs = chatJobs.filter(j => j.status === 'ready');
-    // An auto-triggered ready draft in semi mode reuses the brain glow
-    // instead of the "draft ready" chip — from the user's side, "there's an
-    // LTM waiting for your approval" IS "time for an LTM". A manually
-    // clicked "+ New LTM" always gets the normal ready chip regardless of
-    // autoLtmMode, since the user is already looking right at it.
-    const autoReady = readyJobs.filter(j => j.autoTriggered);
-    const manualReady = readyJobs.filter(j => !j.autoTriggered);
+    const generatingAuto = chatJobs.filter(j => j.status === 'generating' && j.autoTriggered);
+    const generatingManual = chatJobs.filter(j => j.status === 'generating' && !j.autoTriggered);
+    const readyAuto = chatJobs.filter(j => j.status === 'ready' && j.autoTriggered);
+    const readyManual = chatJobs.filter(j => j.status === 'ready' && !j.autoTriggered);
     const failed = chatJobs.filter(j => j.status === 'failed').length;
-    const generating = chatJobs.filter(j => j.status === 'generating').length;
 
-    if (generating) { applyBrainDue(false); return setChip('🧠 LTM generating…', 'info'); }
-    if (manualReady.length) { applyBrainDue(false); return setChip(`📝 ${manualReady.length} LTM draft${manualReady.length > 1 ? 's' : ''} ready`, 'ready'); }
-    if (autoReady.length && settings.autoLtmMode === 'semi') { applyBrainDue(true); return hideChip(); }
-    if (failed) { applyBrainDue(false); return setChip('⚠️ LTM failed — click to reroll', 'error'); }
-    const chat = SillyTavern.getContext().chat || [];
-    const due = settings.suggestLTMs && (chat.length - 1) >= getEffectiveGoal();
-    applyBrainDue(settings.autoLtmMode !== 'full' && due);
+    if (generatingManual.length) return setChip('🧠 LTM generating…', 'info');
+    if (generatingAuto.length) {
+        return setChip(settings.autoLtmMode === 'full' ? 'Generating LTM…' : 'Drafting an LTM…', 'urgent');
+    }
+    if (readyManual.length) return setChip(`📝 ${readyManual.length} LTM draft${readyManual.length > 1 ? 's' : ''} ready`, 'ready');
+    if (readyAuto.length && settings.autoLtmMode === 'semi') return setChip('LTM ready for approval', 'urgent');
+    if (failed) return setChip('⚠️ LTM failed — click to reroll', 'error');
+
+    // The passive due-nudge only applies to Off mode — Semi/Full both
+    // auto-trigger the instant the cap is hit (maybeAutoTrigger, above), so
+    // there's no "due but nothing happening yet" gap to nudge about there.
+    if (settings.autoLtmMode === 'off' && settings.suggestLTMs) {
+        const chat = SillyTavern.getContext().chat || [];
+        if ((chat.length - 1) >= getEffectiveGoal()) return setChip('Time for an LTM?', 'urgent');
+    }
     hideChip();
 }
 
@@ -1296,7 +1309,7 @@ function buildModalHtml() {
           </div>
           <small class="wlm-recommend-disclaimer">Lucky does not recommend Sonnet for LTM generation. Instead, use glm-4.7-thinking and gemini-3-pro-preview whenever possible. This ensures our Sonnet supply is used for actual messaging rather than LTM requests.</small>
         </label>
-        <label class="wlm-field" title="How many new messages should pass before the brain icon lights up to suggest a new LTM. On Auto below, this also sets how many messages go into each memory.">
+        <label class="wlm-field" title="How many new messages should pass before the reminder banner suggests a new LTM. On Auto below, this also sets how many messages go into each memory.">
           <span>Suggest an LTM every N messages</span>
           <input id="wlm-set-cadence" type="number" min="10" step="10" />
         </label>
@@ -1316,9 +1329,9 @@ function buildModalHtml() {
           <input id="wlm-set-stream" type="checkbox" />
           <span>Stream drafts into the editor</span>
         </label>
-        <label class="wlm-field wlm-check" title="Once enough new messages pile up since the last saved memory, the brain button in the quick-reply bar glows orange as a gentle nudge. Only applies in Off/Semi-Auto below — Full-Auto never needs your attention.">
+        <label class="wlm-field wlm-check" title="Once enough new messages pile up since the last saved memory, a small \"Time for an LTM?\" banner pops up top-center as a gentle nudge. Only applies in Off mode below — Semi/Full-Auto auto-trigger instead of nudging. Tap it to dismiss, or it clears itself after a minute.">
           <input id="wlm-set-suggest" type="checkbox" />
-          <span>Glow the 🧠 button when it's time for an LTM</span>
+          <span>Show a reminder when it's time for an LTM</span>
         </label>
         <label class="wlm-field" title="Off: nothing automatic, you click '+ New LTM' yourself. Semi-Auto: a draft is generated in the background the moment you hit your cap, but it still needs your Save. Full-Auto: same background generation, but it saves itself the instant it passes validation — no review step.">
           <span>Auto-LTM</span>
@@ -1327,7 +1340,7 @@ function buildModalHtml() {
             <option value="semi">Semi-Auto — auto-draft, you approve</option>
             <option value="full">Full-Auto — auto-draft and auto-save</option>
           </select>
-          <small>Semi-Auto still glows the 🧠 button once a draft is ready for your review. Full-Auto never glows — watch for the brief "LTM generating…" flag instead.</small>
+          <small>Semi-Auto shows "Drafting an LTM…" then "LTM ready for approval". Full-Auto just shows a brief "Generating LTM…" — nothing is ever left waiting on you.</small>
         </label>
         <label class="wlm-field" title="Controls whether memories are written as the character's own diary entry (1st person) or as a neutral, uncharacterized account (3rd person).">
           <span>Narrative point of view</span>
