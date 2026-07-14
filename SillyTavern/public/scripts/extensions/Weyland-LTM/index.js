@@ -42,7 +42,7 @@ const {
 } = ctx;
 
 export const WLM_MODULE_NAME = 'Weyland-LTM';
-const EXT_VERSION = '1.5.4';
+const EXT_VERSION = '1.5.5';
 
 // Default LTM model out of the box for every fresh install. Lucky wants
 // Sonnet reserved for actual roleplay messaging rather than burned on LTM
@@ -798,6 +798,19 @@ const LTM_MARKER_PREFIX = 'ltm:'; // new entries: automationId = "ltm:<uuid>"
 // bound lorebook — from the old STscript pipeline, or from the user
 // manually attaching one — gets reused instead of a second book getting
 // created alongside it.
+//
+// Per-chat lock: two nearly-simultaneous callers (e.g. Auto-LTM's
+// background save landing at the same moment as a manual Save from the
+// panel) must not both see "no book yet" and each independently
+// createNewWorldInfo() their own — the check-then-create below has a gap
+// between reading meta[METADATA_KEY] and the metadata write actually
+// completing, and that gap is exactly where a second caller can slip in and
+// duplicate the lorebook. Whoever calls first does the real work; anyone
+// else for the SAME chat just awaits that same in-flight promise instead of
+// racing it. Keyed by chatId, not global, so concurrent activity in
+// unrelated chats never blocks on each other.
+const chatBookCreationInFlight = new Map(); // chatId -> Promise<string>
+
 async function getOrCreateChatBookName() {
     const c = SillyTavern.getContext();
     const meta = c.chatMetadata;
@@ -805,12 +818,24 @@ async function getOrCreateChatBookName() {
         return meta[METADATA_KEY];
     }
     if (!c.chatId) throw new Error('Open a chat first');
-    const name = `Chat Book ${c.chatId}`.replace(/[^a-z0-9]/gi, '_').replace(/_{2,}/g, '_').substring(0, 64);
-    await createNewWorldInfo(name);
-    meta[METADATA_KEY] = name;
-    await c.saveMetadata();
-    document.querySelectorAll('.chat_lorebook_button').forEach(el => el.classList.add('world_set'));
-    return name;
+    const chatId = c.chatId;
+    const inFlight = chatBookCreationInFlight.get(chatId);
+    if (inFlight) return inFlight;
+
+    const creation = (async () => {
+        try {
+            const name = `Chat Book ${chatId}`.replace(/[^a-z0-9]/gi, '_').replace(/_{2,}/g, '_').substring(0, 64);
+            await createNewWorldInfo(name);
+            meta[METADATA_KEY] = name;
+            await c.saveMetadata();
+            document.querySelectorAll('.chat_lorebook_button').forEach(el => el.classList.add('world_set'));
+            return name;
+        } finally {
+            chatBookCreationInFlight.delete(chatId);
+        }
+    })();
+    chatBookCreationInFlight.set(chatId, creation);
+    return creation;
 }
 
 function getChatBookNameIfExists() {
@@ -1166,22 +1191,29 @@ async function runAutoJob(job) {
     if (job.status === 'ready' && settings.autoLtmMode === 'full') {
         await autoSaveJob(job);
     }
-    updateChip();
+    // trigger:false — a completed auto-job must NOT immediately queue the
+    // next segment on its own. Without this, a long-overdue chat cascades
+    // through its entire backlog in one uninterrupted burst (each job's
+    // completion re-firing the next), which is exactly the "opened a
+    // 300-message chat and got hit with a pile of LTMs" bug. Catching up
+    // now happens gradually: at most one new segment per genuine incoming
+    // message (see the MESSAGE_RECEIVED listener), never per chat-open and
+    // never self-chained.
+    updateChip({ trigger: false });
     refreshSidebar();
 }
 
-// Called on every updateChip() pass (chat change, message received, and —
-// importantly — runAutoJob's own completion). Uses the auto-draft cursor
-// (getAutoTriggerCursor), NOT "does any job already exist for this chat" —
-// semi-auto drafts are meant to STACK, so a second cap hit while an earlier
-// draft is still unapproved must queue its OWN segment, not get swallowed
-// by an "already have something pending" guard. The only thing that DOES
-// block a new trigger is an in-flight generation: segments are produced one
-// at a time, never concurrently. If the cursor is still behind after one
-// finishes, runAutoJob's own updateChip() call re-enters this function and
-// queues the next segment — a long absence cascades through several
-// appropriately-sized drafts instead of firing them all at once or losing
-// everything past the first.
+// Called from updateChip() when trigger !== false — i.e. on real new chat
+// activity (a message actually arriving), NOT on chat-open/switch and NOT
+// automatically re-invoked by a just-finished auto-job (see runAutoJob).
+// Uses the auto-draft cursor (getAutoTriggerCursor), NOT "does any job
+// already exist for this chat" — semi-auto drafts are meant to STACK, so a
+// second cap hit while an earlier draft is still unapproved must queue its
+// OWN segment, not get swallowed by an "already have something pending"
+// guard. The only thing that DOES block a new trigger is an in-flight
+// generation: segments are produced one at a time, never concurrently. A
+// long-overdue chat still fully catches up — just one segment per message
+// instead of all at once — because each new message re-checks the cursor.
 function maybeAutoTrigger(chatJobs) {
     if (settings.autoLtmMode === 'off' || !settings.enabled) return;
     const chatId = getCurrentChatId();
@@ -1208,10 +1240,22 @@ function maybeAutoTrigger(chatJobs) {
 // from auto-triggered ones, since the user driving a manual job is already
 // looking right at the panel and doesn't need the same "hey, look over
 // here" framing an unattended background draft does.
-function updateChip() {
+//
+// `trigger` (default FALSE) gates whether this pass is allowed to fire
+// maybeAutoTrigger. Defaulting to false is deliberate: updateChip() is
+// called from a couple dozen places (job lifecycle transitions, settings
+// changes, panel open/close, chat switch...), and ANY of those firing a new
+// auto-trigger is how a chat-open or a job's own completion turns into a
+// self-perpetuating cascade through the entire backlog — the "opened a
+// 300-message chat and got hit with a pile of LTMs" bug. Only genuine new
+// chat activity (an incoming message) should ever start a new auto-job, so
+// only the MESSAGE_RECEIVED listener opts in with {trigger: true}. Every
+// other caller still gets a chip that correctly reflects whatever's already
+// true (an existing job, an already-due state) — it just can't CAUSE one.
+function updateChip({ trigger = false } = {}) {
     if (!settings.enabled) return hideChip();
     let chatJobs = getJobsForChat(getCurrentChatId());
-    maybeAutoTrigger(chatJobs);
+    if (trigger) maybeAutoTrigger(chatJobs);
     chatJobs = getJobsForChat(getCurrentChatId()); // re-fetch: maybeAutoTrigger may have just queued one this same tick
 
     const generatingAuto = chatJobs.filter(j => j.status === 'generating' && j.autoTriggered);
@@ -2147,12 +2191,19 @@ function addWandMenuItem() {
 
         eventSource?.on?.(event_types?.CHAT_CHANGED, () => {
             resetEditorSelection();
-            updateChip();
+            // trigger:false — opening/switching chats must only ever REFLECT
+            // existing state, never kick off a new auto-draft. Otherwise a
+            // long-overdue chat (or one where Auto-LTM was just turned on)
+            // starts generating the instant it's opened, with no message
+            // sent — see runAutoJob for the matching half of this fix.
+            updateChip({ trigger: false });
             if (document.getElementById(MODAL_ID)?.style.display === 'block') {
                 refreshSidebar();
             }
         });
-        eventSource?.on?.(event_types?.MESSAGE_RECEIVED, () => updateChip());
+        // The ONLY event allowed to start a new auto-job — see updateChip's
+        // trigger param doc for why every other call site defaults to false.
+        eventSource?.on?.(event_types?.MESSAGE_RECEIVED, () => updateChip({ trigger: true }));
         eventSource?.on?.(event_types?.APP_READY, () => addWandMenuItem());
 
         console.info(`[${WLM_MODULE_NAME}] initialized v${EXT_VERSION}`);
