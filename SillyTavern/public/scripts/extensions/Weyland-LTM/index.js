@@ -28,10 +28,10 @@ import {
     createNewWorldInfo,
     METADATA_KEY,
     world_names,
-} from '../../../world-info.js';
-import { oai_settings } from '../../../openai.js';
-import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
-import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
+} from '../../world-info.js';
+import { oai_settings } from '../../openai.js';
+import { SlashCommand } from '../../slash-commands/SlashCommand.js';
+import { SlashCommandParser } from '../../slash-commands/SlashCommandParser.js';
 
 const ctx = SillyTavern.getContext();
 const {
