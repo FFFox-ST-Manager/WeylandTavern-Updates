@@ -28,6 +28,10 @@
         "type": "world"
     },
     {
+        "filename": "Weyland Characters.json",
+        "type": "world"
+    },
+    {
         "filename": "user-default.png",
         "type": "avatar"
     },
