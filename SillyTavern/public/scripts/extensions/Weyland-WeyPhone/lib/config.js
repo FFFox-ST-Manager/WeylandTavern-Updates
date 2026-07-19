@@ -28,6 +28,10 @@ export const defaultSettings = Object.freeze({
     // migrated to their prior modelOverride below so this split does not silently change DMs.
     textingModelOverride: 'minimax-m3',
     kressaModel: '', // '' = live main-chat model (default per Lucky)
+    // Weyland's global Hard Mode is deliberately isolated from WeyPhone. These independent
+    // opt-ins only take effect while the global HardToggle is actually On.
+    phoneHardModeEnabled: false,
+    kressaHardModeEnabled: false,
     kressaPalette: 'twilight',
     calculatorPalette: 'graphite',
     pawxai: {

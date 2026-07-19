@@ -243,7 +243,7 @@ function discorgiHeaderMarkup(activeChannelNames = []) {
     return `
 <div class="wp-discorgi-header">
     <div class="wp-discorgi-topline">
-        <span class="wp-discorgi-brand"><i class="fa-solid fa-dog"></i> Weyland University Discord</span>
+        <span class="wp-discorgi-brand"><i class="fa-solid fa-dog"></i> Weyland University Discorgi</span>
         <span class="wp-discorgi-server-name"></span>
         ${inlineHelpButton('chat')}
     </div>
