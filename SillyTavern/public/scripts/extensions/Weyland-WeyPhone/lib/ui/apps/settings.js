@@ -289,6 +289,18 @@ export function renderSettingsScreen(container, { settings, currentLiveModel, lo
     </label>
 </div>`;
 
+    const behaviorSection = `
+<div class="wp-settings-section">
+    <div class="wp-settings-section-title">Generation Behavior</div>
+    ${toggleRowMarkup({
+        id: 'wp-settings-hard-mode',
+        label: 'Allow Hard Mode in WeyPhone',
+        sub: 'Apply Weyland Hard Mode to supported phone requests while the global Hard Mode toggle is on',
+        checked: Boolean(settings.phoneHardModeEnabled),
+    })}
+    <div class="wp-settings-hint">Off by default. The global storytelling toggle cannot affect WeyPhone unless you enable this. Kressa has her own independent setting.</div>
+</div>`;
+
     const formatSection = `
 <div class="wp-settings-section wp-format-section">
     <div class="wp-settings-section-title">Device</div>
@@ -326,6 +338,7 @@ export function renderSettingsScreen(container, { settings, currentLiveModel, lo
     ${batterySection}
     ${tetherSection}
     ${modelSection}
+    ${behaviorSection}
     ${labelsSection}
     ${transferSection}
     ${logSection}

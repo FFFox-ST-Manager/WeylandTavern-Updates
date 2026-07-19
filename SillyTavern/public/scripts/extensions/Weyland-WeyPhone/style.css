@@ -3153,6 +3153,26 @@
 #wp-panel[data-app="kressa"] .wp-kressa-settings .wp-btn-sm { background: color-mix(in srgb, var(--kr-bg) 72%, var(--kr-accent) 28%); color: var(--kr-accent); }
 #wp-panel[data-app="kressa"] .wp-kressa-settings .wp-settings-recommend-label,
 #wp-panel[data-app="kressa"] .wp-kressa-settings .wp-settings-recommend-disclaimer { color: var(--kr-muted); }
+#wp-panel[data-app="kressa"] .wp-kressa-settings .wp-settings-toggle-row {
+    color: var(--kr-text);
+    background: color-mix(in srgb, var(--kr-bg) 84%, var(--kr-accent) 16%);
+    border: 1px solid color-mix(in srgb, var(--kr-accent) 24%, transparent);
+}
+#wp-panel[data-app="kressa"] .wp-kressa-settings .wp-settings-toggle-label { color: var(--kr-text); }
+#wp-panel[data-app="kressa"] .wp-kressa-settings .wp-settings-sub,
+#wp-panel[data-app="kressa"] .wp-kressa-settings .wp-settings-hint { color: var(--kr-muted); }
+#wp-panel[data-app="kressa"] .wp-kressa-settings .wp-toggle-track {
+    background: color-mix(in srgb, var(--kr-bg) 68%, var(--kr-muted) 32%);
+}
+#wp-panel[data-app="kressa"] .wp-kressa-settings .wp-toggle-thumb {
+    background: color-mix(in srgb, #fff 86%, var(--kr-bg));
+}
+#wp-panel[data-app="kressa"] .wp-kressa-settings .wp-toggle-input:checked ~ .wp-toggle-track {
+    background: linear-gradient(135deg, var(--kr-accent), var(--kr-accent-2));
+}
+#wp-panel[data-app="kressa"] .wp-kressa-settings .wp-toggle-input:focus-visible ~ .wp-toggle-track {
+    outline-color: var(--kr-accent);
+}
 
 /* Keep Switch Threads inside Kressa's visual world instead of falling back to Messages red. */
 #wp-panel[data-app="kressa"][data-view="threads"] #wp-screen-body { padding: 10px; gap: 8px; }

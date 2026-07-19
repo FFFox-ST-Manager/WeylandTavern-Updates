@@ -63,6 +63,8 @@ import { applySettingsPatch, createSettingsPatch, mergeWeyPhoneSettings, replace
 import { ravs } from '../quick-reply-ext/src/rav.js';
 import { charPer } from '../quick-reply-ext/src/charper.js';
 import { world_names } from '../../world-info.js';
+import { applyPhoneHardModePolicy } from './lib/phonePromptPolicy.js';
+import { isGeneralMessagingContact } from './lib/contactVisibility.js';
 
 // One of the 10 data-view values showScreen() sets on #wp-panel:
 // 'home' | 'contacts' | 'conversation' | 'memory' | 'messages' | 'threads' | 'phone-app' |
@@ -583,6 +585,10 @@ function rerenderIfStillViewing(conversationId, messages) {
     if (conversation) updateRegenerateEnabled(conversation);
 }
 
+function isGlobalHardModeEnabled(context) {
+    return String(context.variables.global.get('HardToggle') ?? '').trim().toLowerCase() === 'on';
+}
+
 function recordIncomingDmNotification(context, settings, conversationId, conversation, incomingMessages) {
     if (currentView === 'conversation' && currentConversationId === conversationId) return false;
     const latest = [...incomingMessages].reverse().find(message => message?.role === 'assistant' && message.content);
@@ -707,7 +713,10 @@ async function runFlavorAppGeneration({ trackingSet, trackingKey, rerender, buil
         const mainHistory = convertMainChatToMessages(context.chat);
 
         const systemPromptText = buildSystemPrompt({
-            systemPrompt: resolved.systemPrompt,
+            systemPrompt: applyPhoneHardModePolicy(resolved.systemPrompt, {
+                allowHardMode: Boolean(settings.phoneHardModeEnabled),
+                hardModeEnabled: isGlobalHardModeEnabled(context),
+            }),
             worldInfoBefore: '',
             descriptionText: resolved.descriptionText,
             personalityText: resolved.personalityText,
@@ -1248,7 +1257,10 @@ async function generateReply(conversationId, conversation, context, settings) {
         const tetheredBlock = await buildTetheredContext(context, conversation);
         const worldInfoAfterWithMemory = joinNonEmptySections([worldInfo.worldInfoAfter, memoryBlock, tetheredBlock]);
         const systemPromptText = buildSystemPrompt({
-            systemPrompt: resolved.systemPrompt,
+            systemPrompt: applyPhoneHardModePolicy(resolved.systemPrompt, {
+                allowHardMode: Boolean(isKressa ? settings.kressaHardModeEnabled : settings.phoneHardModeEnabled),
+                hardModeEnabled: isGlobalHardModeEnabled(context),
+            }),
             worldInfoBefore: worldInfo.worldInfoBefore,
             descriptionText: resolved.descriptionText,
             personalityText: resolved.personalityText,
@@ -1905,6 +1917,7 @@ function resolveSubbotBook(entry) {
 
 function getGroupContacts(settings) {
     return getCombinedContactEntries(settings)
+        .filter(isGeneralMessagingContact)
         .map(entry => ({ name: entry.name, bookName: resolveSubbotBook(entry) }))
         .filter(entry => entry.bookName)
         .sort((a, b) => a.name.localeCompare(b.name));
@@ -2972,10 +2985,24 @@ function handleScreenBodyChange(event) {
         queueWeyPhoneSave(context);
         return;
     }
+    if (event.target.id === 'wp-settings-hard-mode') {
+        const context = SillyTavern.getContext();
+        const settings = getSettings(context.extensionSettings);
+        settings.phoneHardModeEnabled = event.target.checked;
+        queueWeyPhoneSave(context);
+        return;
+    }
     if (event.target.id === 'wp-kressa-model') {
         const context = SillyTavern.getContext();
         const settings = getSettings(context.extensionSettings);
         settings.kressaModel = event.target.value.trim();
+        queueWeyPhoneSave(context);
+        return;
+    }
+    if (event.target.id === 'wp-kressa-hard-mode') {
+        const context = SillyTavern.getContext();
+        const settings = getSettings(context.extensionSettings);
+        settings.kressaHardModeEnabled = event.target.checked;
         queueWeyPhoneSave(context);
         return;
     }
@@ -3312,7 +3339,7 @@ function showScreen(view) {
                 queueWeyPhoneSave(context);
                 if (currentView === 'contacts-app') showScreen('contacts-app');
             },
-        });
+        }).filter(isGeneralMessagingContact);
         const displayEntries = searchCast(entries, contactsQuery).map(entry => {
             const installedName = resolveInstalledCharacterName(context, entry.name);
             const custom = settings.contactRenames?.[installedName ?? entry.name];
@@ -3365,13 +3392,13 @@ function showScreen(view) {
             });
         }
         const characters = getCombinedContactEntries(settings)
+            .filter(isGeneralMessagingContact)
             .filter(entry => resolveContactCapability(context, entry).messageable)
             .map(entry => ({ name: entry.name }));
         const portraitMap = buildPortraitMap(context.characters, characters.map(c => c.name), context.getThumbnailUrl);
         renderContactsScreen(screenBody, characters, portraitMap);
         return;
     }
-
     if (view === 'group-compose') {
         title.textContent = 'New Group';
         renderPanelAvatar(document.getElementById('wp-panel-avatar'), null);
