@@ -2344,7 +2344,7 @@ async function XXX(charName) {
     try {
         charName = charName || getCurrentCharacterName();
         if (!charName) return;
-        if (getLocalVariable("RPPOVLocalSet") === "") setLocalVariable("RPPOVLocal", getGlobalVariable("RPPov"));
+        if (getLocalVariable("RPPOVLocalSet") === "") setLocalVariable("RPPOVLocal", getGlobalVariable("RPPOV"));
         if (/Kinsbane Manor|Aethel|Muse|Kressa/.test(charName)) await SpecialChar();
         if (getLocalVariable("LocalN") === "") setLocalVariable("LocalNarrator", getGlobalVariable("Narrator"));
         if (ravs.get(getGlobalVariable("PromptChoice")) === undefined) setGlobalVariable("PromptChoice", "Current Prompt");
