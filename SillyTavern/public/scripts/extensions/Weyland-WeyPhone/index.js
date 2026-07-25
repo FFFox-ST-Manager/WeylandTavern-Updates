@@ -2,20 +2,20 @@ import { MODULE_NAME, getSettings, resetSettings } from './lib/config.js';
 import { getRequestHeaders } from '../../../script.js';
 import { resolveMasterPrompt, resolvePostHistoryInstructions, resolvePersonalityText, applySpecialCase } from './lib/promptResolution.js';
 import { buildPhoneWorldInfoScanHistory, findLorebookCharacterEntry, resolveLorebookContactProfile, resolveWorldInfoTethered, resolveWorldInfoUntethered } from './lib/worldInfo.js';
-import { createConversation, getConversation, appendMessage, editMessage, deleteMessage, deleteMessages, deleteConversation, getAllConversationSummaries, genTimestamp, discardTrailingReply, createMemory, editMemory, deleteMemory, setMemoryPinned, getPinnedMemories, setMemorySettings, countExchangesSince, getMemoryWindow, getLastGeneratedMemory, setTetheredSettings, setContactHistorySettings, findOrCreateDedicatedAppConversation, getThreadsFor } from './lib/storage.js';
+import { createConversation, getConversation, appendMessage, editMessage, deleteMessage, deleteMessages, deleteConversation, getAllConversationSummaries, genTimestamp, discardTrailingReply, createMemory, editMemory, deleteMemory, setMemoryPinned, getPinnedMemories, setMemorySettings, countExchangesSince, getMemoryWindow, getLastGeneratedMemory, setTetheredSettings, setContactHistorySettings, findOrCreateDedicatedAppConversation, getThreadsFor, pruneOrphanedChatBuckets } from './lib/storage.js';
 import { buildSystemPrompt, buildGroupSystemPrompt, buildMessages, resolveProfileId, resolveModelOverride, sendMessage, reconstructHistoryAsPhoneFormat, applyMacroSubstitution, joinNonEmptySections, extractResponseText } from './lib/generation.js';
 import { createPanelMarkup, renderHousingScreen, renderMessagesScreen, renderContactsScreen, renderGroupComposeScreen, renderConversationScreen, renderThreadDetailsScreen, renderMessages, renderPanelAvatar, setRegenerateMenuItemsEnabled, renderMemoryScreen, populateConnectionProfileOptions, setRoleplayModePickerState, renderPhoneAppScreen, renderTwitterFollowingScreen, renderTwitterProfileScreen, renderTwitterFeedScreen, renderSavedPostsScreen } from './lib/panel.js';
 import { formatRelativeTime, formatClockTime } from './lib/formatTime.js';
 import { withTypingState } from './lib/generationTracking.js';
 import { buildPortraitMap, buildPsaPortraitMap } from './lib/portraits.js';
 import { mergeInstalledContacts } from './lib/installedContacts.js';
-import { displayCharacterName, findInstalledCharacterName } from './lib/characterIdentity.js';
+import { characterNamesEquivalent, displayCharacterName, findInstalledCharacterName } from './lib/characterIdentity.js';
 import { parseReply, parseGroupReply } from './lib/messageParsing.js';
 import { TEXTING_MODE_INSTRUCTIONS, TEXTING_THOUGHTS_DISABLED } from './lib/textingModeInstructions.js';
 import { FIRST_CONTACT_BLOCK } from './lib/firstContact.js';
 import { isKnownByDefault } from './lib/knownContacts.js';
 import { buildMemoryGenerationMessages, joinMemoriesForInjection, sendMemoryRequest } from './lib/memoryGeneration.js';
-import { isMainRoleplayActive, resolveMainActiveLtmEntries, resolveMainHistorySlice, formatMainHistoryTranscript, buildTetheredViewBlock, convertMainChatToMessages, buildScanHistoryWithExtraText } from './lib/tetheredContext.js';
+import { isMainRoleplayActive, resolveMainActiveLtmEntries, resolveMainHistorySlice, formatMainHistoryTranscript, buildTetheredViewBlock, convertMainChatToMessages, buildScanHistoryWithExtraText, KRESSA_ROLEPLAY_COMPANION_INSTRUCTIONS, KRESSA_POST_CHATLOG_ORIENTATION } from './lib/tetheredContext.js';
 import { getPhoneAppContent, setPhoneAppContent } from './lib/phoneApps.js';
 import { toggleLike } from './lib/twitterLikes.js';
 import { parseTwitterPosts } from './lib/twitterParsing.js';
@@ -61,7 +61,7 @@ import { buildShareBlock, buildShareTitle } from './lib/shareContext.js';
 import { saveShareAsLtmEntry } from './lib/ltmShare.js';
 import { applyMienExpression, loadMienGallery, resolveMienCharacter, selectMienOutfit } from './lib/mien.js';
 import { renderMienScreen } from './lib/ui/apps/mien.js';
-import { buildTetherInjectionPlan, canCapturePhoneScopeIntoConversation, dedupeCapturedMessages, initialRoleplayModeForPhoneScope, locatePhoneScopes, reconcileTetherPrompts, routePhoneScope, sameParticipants } from './lib/roleplayTether.js';
+import { buildTetherInjectionPlan, canCapturePhoneScopeIntoConversation, dedupeCapturedMessages, initialRoleplayModeForPhoneScope, locatePhoneScopes, reconcileTetherPrompts, routePhoneScope, sameParticipants, TETHER_CONTEXT_MESSAGE_OPTIONS } from './lib/roleplayTether.js';
 import { getRoleplayMode, isConversationLinkedToChat, ROLEPLAY_MODES } from './lib/roleplayMode.js';
 import { buildContactContextBlock, buildGroupContactContextBlock, buildPersonaContextBlock, resolveContactContext } from './lib/contactContext.js';
 import { applySettingsPatch, createSettingsPatch, mergeWeyPhoneSettings, replaceSettingsInPlace, settingsChangedDuringRefresh } from './lib/settingsSync.js';
@@ -249,6 +249,93 @@ async function writeServerSettings(settings) {
     if (!response.ok) throw new Error(`Could not save WeyPhone settings (${response.status}).`);
 }
 
+// ---------------------------------------------------------------------------
+// WeyPhone data store (data/<user>/weyphone/weyphone.json)
+// ---------------------------------------------------------------------------
+// WeyPhone's threads used to live inside settings.json. That meant every phone save rewrote the
+// whole global settings file — shared with every other extension and all user settings — so chat
+// data caused write amplification and sat in the blast radius of an unrelated bad write.
+// The store below is the same shape as the old extension_settings.WeyPhone object; only the
+// transport changed, so the merge-safe multi-tab logic in flushWeyPhoneSettings is untouched.
+
+/** @returns {Promise<object|null>} stored payload, or null when nothing has been written yet. */
+async function readWeyPhoneStore() {
+    const response = await fetchSettingsApi('/api/weyphone/data', {
+        method: 'GET',
+        headers: getRequestHeaders(),
+        cache: 'no-cache',
+    });
+    if (!response.ok) throw new Error(`Could not read WeyPhone data (${response.status}).`);
+    const payload = await response.json();
+    const data = payload?.data;
+    // null is meaningful — it is what triggers the one-time migration below. Anything that is not
+    // a plain object is treated as "nothing stored".
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
+    return data;
+}
+
+async function writeWeyPhoneStore(data) {
+    const response = await fetchSettingsApi('/api/weyphone/data', {
+        method: 'POST',
+        headers: getRequestHeaders(),
+        body: JSON.stringify({ data }),
+        cache: 'no-cache',
+    });
+    if (!response.ok) throw new Error(`Could not save WeyPhone data (${response.status}).`);
+}
+
+/**
+ * One-time move of an existing install's WeyPhone data out of settings.json and into its own file.
+ *
+ * Ordering is deliberately paranoid, because getting this wrong means a user opens the phone to
+ * find every conversation gone:
+ *   1. If the data file already exists, nothing to do — it is the source of truth.
+ *   2. Otherwise take whatever is in settings.json (the legacy home) and WRITE it to the file.
+ *   3. READ IT BACK and confirm it is really there.
+ *   4. Only after that verification, clear the legacy copy out of settings.json.
+ * If any step throws, we return the legacy data and leave settings.json completely untouched, so
+ * the worst case is that the data briefly lives in both places — never in neither.
+ *
+ * @returns {Promise<object|null>} the payload WeyPhone should run on, or null for a fresh install.
+ */
+async function migrateWeyPhoneStore() {
+    const stored = await readWeyPhoneStore();
+    if (stored) return stored;
+
+    // No file yet: either a brand-new install, or an existing user who predates the data file.
+    let serverSettings;
+    try {
+        serverSettings = await readServerSettings();
+    } catch (error) {
+        console.warn('[WeyPhone] Could not read settings.json while checking for legacy data:', error);
+        return null;
+    }
+    const legacy = serverSettings?.extension_settings?.[MODULE_NAME];
+    const hasLegacyData = legacy && typeof legacy === 'object' && !Array.isArray(legacy)
+        && Object.keys(legacy).length > 0;
+    if (!hasLegacyData) return null; // fresh install — defaults will be created normally
+
+    try {
+        await writeWeyPhoneStore(legacy);
+        const verified = await readWeyPhoneStore();
+        if (!verified) throw new Error('data file was not readable after writing');
+
+        // Verified present in the new home — now, and only now, drop the legacy copy so settings.json
+        // stops carrying it. A failure here is harmless: the file already holds the real data.
+        delete serverSettings.extension_settings[MODULE_NAME];
+        await writeServerSettings(serverSettings);
+        log('Migrated WeyPhone data out of settings.json into its own file');
+        toastr.success('WeyPhone conversations moved to their own storage file.', 'WeyPhone');
+        return verified;
+    } catch (error) {
+        // Leave settings.json exactly as it was. WeyPhone keeps working from the legacy copy and
+        // migration is retried on the next load.
+        console.error('[WeyPhone] Data migration failed — keeping existing settings.json copy:', error);
+        toastr.warning('WeyPhone could not move its data to the new storage file; your conversations are safe and it will retry next time.', 'WeyPhone');
+        return legacy;
+    }
+}
+
 function queueWeyPhoneSave(context = SillyTavern.getContext(), { delay = WEYPHONE_SAVE_DELAY_MS, retry = false } = {}) {
     if (!retry) settingsSaveRetryCount = 0;
     if (settingsSaveTimer) clearTimeout(settingsSaveTimer);
@@ -269,15 +356,13 @@ async function flushWeyPhoneSettings(context = SillyTavern.getContext()) {
     if (!localPatch.length) return true;
 
     try {
-        const serverSettings = await readServerSettings();
-        if (!serverSettings.extension_settings || typeof serverSettings.extension_settings !== 'object') {
-            serverSettings.extension_settings = {};
-        }
-        const remote = serverSettings.extension_settings[MODULE_NAME];
+        // Reads/writes the dedicated WeyPhone data file rather than rewriting the whole global
+        // settings.json. The three-way merge below is unchanged — only where `remote` comes from
+        // and where `merged` goes has moved, so multi-tab conflict handling behaves exactly as before.
+        const remote = await readWeyPhoneStore();
         const merged = mergeWeyPhoneSettings(base, localSnapshot,
             remote && typeof remote === 'object' && !Array.isArray(remote) ? remote : base);
-        serverSettings.extension_settings[MODULE_NAME] = merged;
-        await writeServerSettings(serverSettings);
+        await writeWeyPhoneStore(merged);
 
         // User input may have arrived while the two network requests were in flight. Preserve it
         // locally, mark the just-written merge as the new baseline, and schedule one more save.
@@ -312,8 +397,8 @@ async function refreshWeyPhoneSettings(context = SillyTavern.getContext()) {
             return false;
         }
         try {
-            const serverSettings = await readServerSettings();
-            const remote = serverSettings.extension_settings?.[MODULE_NAME];
+            // Same dedicated data file the writer uses — see readWeyPhoneStore.
+            const remote = await readWeyPhoneStore();
             if (!remote || typeof remote !== 'object' || Array.isArray(remote)) return false;
             // Lucy can finish generating, a mode can change, or a queued save can complete while
             // readServerSettings is awaiting the network. Applying the response captured before
@@ -416,7 +501,8 @@ const DEFAULT_MEMORY_MAX_TOKENS = 256;
  * @returns {{name: string, avatar: string|null} | undefined}
  */
 function resolveConversationCharacter(context, charName) {
-    return context.characters.find(c => c.name === charName);
+    const installedName = findInstalledCharacterName(context.characters, charName);
+    return installedName ? context.characters.find(character => character.name === installedName) : undefined;
 }
 
 function log(...args) {
@@ -512,13 +598,15 @@ async function resolveCharacterPrompt(context, character, { lorebookContact = fa
     };
 }
 
-async function resolveWorldInfo(context, history, additionalBookNames = []) {
+async function resolveWorldInfo(context, history, additionalBookNames = [], characterNames = [], characterContext = '') {
     const personaLorebookName = context.powerUserSettings?.persona_description_lorebook || '';
     return resolveWorldInfoUntethered({
         loadWorldInfo: context.loadWorldInfo,
         history,
         personaLorebookName,
         additionalBookNames,
+        characterNames,
+        characterContext,
     });
 }
 
@@ -529,28 +617,39 @@ async function resolveWorldInfo(context, history, additionalBookNames = []) {
 // resolveMainActiveLtmEntries's own "no book bound yet" behavior — this function must never throw,
 // since generateReply has no separate error path for "tethered assembly failed" vs "the whole
 // reply failed."
-async function buildTetheredContext(context, conversation) {
+async function buildTetheredContext(context, conversation, { kressaObserver = false } = {}) {
     if (getRoleplayMode(conversation) !== ROLEPLAY_MODES.OBSERVE) return '';
     if (!isMainRoleplayActive({ characterId: context.characterId, groupId: context.groupId })) return '';
 
+    // Observers need the same scene-relevant lore and LTM grounding as the active roleplay. Kressa
+    // remains Kressa because her own app prompt is still the acting character prompt; this material
+    // is reference context only. Her transcript is capped separately below so it cannot become a
+    // second full roleplay context window and tempt the model to continue the scene.
     const worldInfo = await resolveWorldInfoTetheredForMainChat(context);
-
-    const ltmSettings = context.extensionSettings['Weyland-LTM'];
-    const lastLtmMessageId = ltmSettings?.__chatState?.[context.chatId]?.lastLtmMessageId ?? -1;
     const ltmEntries = await resolveMainActiveLtmEntries({
         loadWorldInfo: context.loadWorldInfo,
         chatMetadata: context.chatMetadata,
         chatId: context.chatId,
     });
 
+    const ltmSettings = context.extensionSettings['Weyland-LTM'];
+    const lastLtmMessageId = ltmSettings?.__chatState?.[context.chatId]?.lastLtmMessageId ?? -1;
+
     const historySlice = resolveMainHistorySlice({
         chat: context.chat,
         lastLtmMessageId,
-        historyCap: conversation.tetheredHistoryCap,
+        historyCap: kressaObserver
+            ? Math.min(15, Number.isFinite(conversation.tetheredHistoryCap) ? conversation.tetheredHistoryCap : 15)
+            : conversation.tetheredHistoryCap,
     });
     const historyTranscript = formatMainHistoryTranscript(historySlice);
 
-    return buildTetheredViewBlock({ worldInfoText: worldInfo, ltmEntries, historyTranscript });
+    return buildTetheredViewBlock({
+        worldInfoText: worldInfo,
+        ltmEntries,
+        historyTranscript,
+        postTranscriptInstructions: kressaObserver ? KRESSA_POST_CHATLOG_ORIENTATION : '',
+    });
 }
 
 // Scans World Info against the MAIN chat's own history (not WeyPhone's texting history) — this is
@@ -667,7 +766,19 @@ function recordIncomingDmNotification(context, settings, conversationId, convers
         || ((conversation.participants?.length ?? 1) > 1
             ? conversation.participants.join(', ')
             : (latest.speaker || conversation.charName || 'New message'));
-    recordMessageNotification(settings, context.chatId, { title, text: latest.content, conversationId });
+    // A dedicated-app thread (Kressa) opens from its own home tile, not Messages, so its
+    // notification has to badge that tile instead. Validate the tag against the registry first —
+    // an unknown/stale appKey would badge no tile at all and could never be cleared, so fall back
+    // to Messages in that case.
+    const dedicatedAppKey = conversation.isDedicatedApp;
+    const appKey = dedicatedAppKey && getApp(dedicatedAppKey) ? dedicatedAppKey : 'messages';
+    recordMessageNotification(settings, context.chatId, {
+        title,
+        text: latest.content,
+        conversationId,
+        appKey,
+        appLabel: resolveAppLabel(settings, appKey),
+    });
     if (currentView === 'home') showScreen('home');
     renderShadeNow();
     renderLockScreenNow();
@@ -1234,7 +1345,19 @@ async function generateGroupReply(conversationId, conversation, context, setting
             if (!profile) throw new Error(`No subbot profile was found for ${name}. Group chats never fall back to full character cards.`);
             profiles.push({ name, personalityText: profile.personalityText });
         }
-        const worldInfo = await resolveWorldInfo(context, buildPhoneWorldInfoScanHistory(conversation.messages), Object.values(conversation.participantBooks ?? {}).filter(name => name !== 'Weyland'));
+        const groupProfileContext = profiles.map(profile => applyMacroSubstitution({
+            substituteParams: context.substituteParams,
+            content: profile.personalityText,
+            userName: context.name1 || 'User',
+            charName: profile.name,
+        })).join('\n');
+        const worldInfo = await resolveWorldInfo(
+            context,
+            buildPhoneWorldInfoScanHistory(conversation.messages),
+            Object.values(conversation.participantBooks ?? {}).filter(name => name !== 'Weyland'),
+            participants,
+            groupProfileContext,
+        );
         const userName = context.name1 || 'User';
         const personaContext = buildPersonaContextBlock(userName, context.powerUserSettings?.persona_description);
         const systemPrompt = buildGroupSystemPrompt({
@@ -1340,16 +1463,28 @@ async function generateReply(conversationId, conversation, context, settings) {
             isMainRoleplayActive({ characterId: context.characterId, groupId: context.groupId });
         const worldInfo = effectivelyTethered
             ? { worldInfoBefore: '', worldInfoAfter: '' }
-            : await resolveWorldInfo(context, worldInfoScanHistory, conversation.lorebookName && conversation.lorebookName !== 'Weyland'
-                ? [conversation.lorebookName]
-                : []);
+            : await resolveWorldInfo(
+                context,
+                worldInfoScanHistory,
+                conversation.lorebookName && conversation.lorebookName !== 'Weyland' ? [conversation.lorebookName] : [],
+                [character.name],
+                applyMacroSubstitution({
+                    substituteParams: context.substituteParams,
+                    content: joinNonEmptySections([resolved.descriptionText, resolved.personalityText]),
+                    userName: context.name1 || 'User',
+                    charName: character.name,
+                }),
+            );
         const pinnedMemories = getPinnedMemories(settings, conversationId);
         const memoryBlock = joinMemoriesForInjection(pinnedMemories);
         // Kressa keeps her normal fixed-Weyland retrieval, but Observe must still append the
         // active story as a read-only [TETHERED VIEW] — that is the entire "show Kressa my Nara
         // roleplay" use case. Other observing DMs swap their own scan for the active roleplay's
         // scan above; Kressa's assistant identity/lore remains additive and intact.
-        const tetheredBlock = await buildTetheredContext(context, conversation);
+        const tetheredBlock = await buildTetheredContext(context, conversation, { kressaObserver: isKressa });
+        const kressaObserverInstructions = isKressa && tetheredBlock
+            ? KRESSA_ROLEPLAY_COMPANION_INSTRUCTIONS
+            : '';
         const worldInfoAfterWithMemory = joinNonEmptySections([worldInfo.worldInfoAfter, memoryBlock, tetheredBlock]);
         const systemPromptText = buildSystemPrompt({
             systemPrompt: applyPhoneHardModePolicy(resolved.systemPrompt, {
@@ -1380,6 +1515,7 @@ async function generateReply(conversationId, conversation, context, settings) {
             firstContactBlock,
             TEXTING_MODE_INSTRUCTIONS,
             relationshipContext,
+            kressaObserverInstructions,
             TEXTING_THOUGHTS_DISABLED,
         ]);
 
@@ -1930,7 +2066,9 @@ async function runPawXaiGeneration() {
     }
     const context = SillyTavern.getContext();
     const settings = getSettings(context.extensionSettings);
-    updateHeaderGenerationCounter(context, settings, appKey === 'chronicle');
+    // PawXai owns its in-app allowance display; the shared header counter belongs to Chronicle.
+    // Keep this explicit so a copied app-local variable cannot crash before the generation try.
+    updateHeaderGenerationCounter(context, settings, false);
     settings.pawxai = normalizePawXaiSettings(settings.pawxai);
     let allowance = currentGenerationAllowance(context, settings);
     if (!allowance.allowed) {
@@ -2873,10 +3011,14 @@ function handleScreenBodyClick(event) {
         }
         const appKey = appTile.dataset.app;
         const app = getApp(appKey);
-        if (appKey === 'messages') {
-            const context = SillyTavern.getContext();
-            const settings = getSettings(context.extensionSettings);
-            markAppNotificationsRead(settings, context.chatId, 'messages');
+        // Mirrors openNotificationTarget's shade-entry behavior — any app tile opened directly
+        // from the home screen should clear its own badge too, not just Messages. Guarded on a
+        // truthy appKey because markAppNotificationsRead treats a missing key as "mark ALL apps
+        // read"; a tile without data-app must never silently wipe every badge.
+        const context = SillyTavern.getContext();
+        const settings = getSettings(context.extensionSettings);
+        if (appKey) {
+            markAppNotificationsRead(settings, context.chatId, appKey);
             queueWeyPhoneSave(context);
             renderShadeNow();
             renderLockScreenNow();
@@ -3283,6 +3425,21 @@ function handleWallpaperRangeInput(target) {
     return true;
 }
 
+// Discrete slider (15/30/45/60/All) controlling how many recent Linked-thread texts are injected
+// into the roleplay as context. The slider position is an index into TETHER_CONTEXT_MESSAGE_OPTIONS;
+// 0 in that list means "no cap". Returns true when it handled the event.
+function handleTetherContextRangeInput(target) {
+    if (target.id !== 'wp-settings-tether-context') return false;
+    const context = SillyTavern.getContext();
+    const settings = getSettings(context.extensionSettings);
+    const value = TETHER_CONTEXT_MESSAGE_OPTIONS[Number(target.value)] ?? 30;
+    settings.tetherContextMessages = value;
+    const output = document.getElementById('wp-tether-context-value');
+    if (output) output.textContent = value === 0 ? 'All messages' : `${value} messages`;
+    queueWeyPhoneSave(context);
+    return true;
+}
+
 function handleScreenBodyChange(event) {
     if (applyTimerFieldFromEvent(event.target)) return;
     // Alarm recurrence change re-renders the editor so the kind-specific fields swap in.
@@ -3342,6 +3499,7 @@ function handleScreenBodyChange(event) {
         return;
     }
     if (handleWallpaperRangeInput(event.target)) return;
+    if (handleTetherContextRangeInput(event.target)) return;
     if (event.target.id === 'wp-mien-outfit') {
         currentMienGallery = selectMienOutfit(currentMienGallery, event.target.value);
         currentMienIndex = 0;
@@ -4189,6 +4347,12 @@ function showScreen(view) {
     helpButton.classList.toggle('wp-help-visible', Boolean(helpAppKey));
     helpButton.dataset.appKey = helpAppKey ?? '';
     helpButton.dataset.appLabel = helpAppKey ? resolveAppLabel(settings, helpAppKey) : '';
+    // The obfuscated Weyland/Registrar lorebooks resolve through {{getvar}} shortcodes that only
+    // populate while a chat is open (context.chatId is undefined otherwise) — texting from that
+    // state silently gets hollow, contact-less replies with no error. Surface it instead of
+    // letting it fail invisibly. (CHAT_CHANGED keeps this live without needing to leave the
+    // screen; this call just covers the initial render / direct navigation into the view.)
+    updateLoreWarningAvailability();
     updateHeaderGenerationCounter(context, settings, view === 'phone-app' && currentPhoneApp === 'chronicle');
     const helpDialog = document.getElementById('wp-app-help');
     helpDialog.hidden = true;
@@ -4985,6 +5149,17 @@ function updateRoleplayModeAvailability() {
     });
 }
 
+// CHAT_CHANGED fires the instant a chat opens OR closes (context.chatId flips to a value or back
+// to undefined) — reacting here means the header icon drops the moment lore actually becomes
+// available, instead of waiting for the user to leave and re-enter the conversation screen for
+// showScreen's own check to rerun.
+function updateLoreWarningAvailability() {
+    const loreWarningButton = document.getElementById('wp-lore-warning-button');
+    if (!loreWarningButton) return;
+    const context = SillyTavern.getContext();
+    loreWarningButton.classList.toggle('wp-lore-warning-visible', currentView === 'conversation' && !context.chatId);
+}
+
 // Re-renders the Home app grid (recomputing which flavor tiles should be enabled/disabled) if
 // it's currently the visible screen — called on the same CHAT_CHANGED event as
 // updateTetheredToggleAvailability, so activating/deactivating a main roleplay chat updates the
@@ -5222,13 +5397,20 @@ function initLockScreenGesture(lockScreen) {
 }
 
 function captureKnownNames(context, settings) {
-    const names = new Set([
-        ...context.characters.map(character => character.name),
-        ...WEYLAND_ROSTER.map(character => character.name),
+    // Directory labels are WeyPhone's canonical display identities. Installed cards and roster
+    // entries are appended only when they do not describe somebody already present, preventing
+    // "Sayori Akiyama" and "Professor Akiyama" from becoming two competing capture targets.
+    const candidates = [
         ...getCastEntries(settings).map(entry => entry.name),
         ...contactLorebookState.registrarContacts.map(entry => entry.name),
-    ].filter(Boolean));
-    return [...names];
+        ...context.characters.map(character => character.name),
+        ...WEYLAND_ROSTER.map(character => character.name),
+    ].filter(Boolean);
+    const names = [];
+    for (const candidate of candidates) {
+        if (!names.some(name => characterNamesEquivalent(name, candidate))) names.push(candidate);
+    }
+    return names;
 }
 
 function findCapturedThread(settings, participants, chatId) {
@@ -5384,6 +5566,7 @@ async function weyPhoneMainChatInterceptor() {
                 chat: context.chat,
                 userName: context.name1 || 'User',
                 formatClockTime: formatTetherClockTime,
+                maxMessages: settings.tetherContextMessages,
             })
             : { caution: null, groups: [] };
         const reconciled = reconcileTetherPrompts(plan, tetherPromptKeys);
@@ -5592,6 +5775,14 @@ function initPanel() {
             appLabel: helpButton.dataset.appLabel,
         });
     });
+    document.getElementById('wp-lore-warning-button').addEventListener('click', () => {
+        renderNoticeDialog(helpDialog, {
+            kicker: 'Heads up',
+            title: 'Lore isn’t fully loaded yet',
+            body: 'Weyland’s character and location lore only stays loaded while a chat is open — it doesn’t matter which one. Until then, replies here may be missing details they\'d normally know.',
+            bullets: ['Open any character or chat in WeylandTavern.', 'Continue on your phone. Since a chat is loaded, WeyPhone now has access to all of Weyland’s lorebook.', 'This warning comes back if you close out of every chat.'],
+        });
+    });
     helpDialog.addEventListener('click', event => {
         if (!event.target.closest('[data-help-close]')) return;
         helpDialog.hidden = true;
@@ -5658,6 +5849,7 @@ function initPanel() {
     context.eventSource.on(context.eventTypes.MESSAGE_RECEIVED, refreshRpAlarmsOnMessage);
     context.eventSource.on(context.eventTypes.CHAT_CHANGED, updateRoleplayModeAvailability);
     context.eventSource.on(context.eventTypes.CHAT_CHANGED, refreshHomeScreenAvailability);
+    context.eventSource.on(context.eventTypes.CHAT_CHANGED, updateLoreWarningAvailability);
     const refreshAfterResume = () => {
         if (document.visibilityState === 'hidden') return;
         void refreshWeyPhoneSettings(SillyTavern.getContext()).then(changed => {
@@ -5696,6 +5888,7 @@ function initPanel() {
     // Notes editor — persist on every keystroke (saveSettingsDebounced coalesces the writes).
     screenBody.addEventListener('input', (event) => {
         if (handleWallpaperRangeInput(event.target)) return;
+        if (handleTetherContextRangeInput(event.target)) return;
         if (applyTimerFieldFromEvent(event.target)) return;
         if (applyAlarmFieldFromEvent(event.target)) return;
         if (event.target.id === 'wp-group-title') {
@@ -5734,8 +5927,27 @@ function initPanel() {
 
 jQuery(async () => {
     const context = SillyTavern.getContext();
+    // Load WeyPhone's data from its own file BEFORE anything reads settings, migrating an existing
+    // install out of settings.json on first run. On any failure this returns null (or the legacy
+    // copy) and WeyPhone falls back to whatever ST already loaded into extensionSettings, so a
+    // storage problem degrades to the old behavior instead of showing an empty phone.
+    try {
+        const stored = await migrateWeyPhoneStore();
+        if (stored) {
+            context.extensionSettings[MODULE_NAME] = stored;
+        }
+    } catch (error) {
+        console.error('[WeyPhone] Could not load stored data; falling back to settings.json copy:', error);
+    }
     const settings = getSettings(context.extensionSettings);
+    // Sweep stale per-chat caches once per load. These are keyed by chatId and were never cleaned
+    // up, so they grew with the number of chats a user had ever opened. Both are regenerable caches.
+    const prunedBuckets = pruneOrphanedChatBuckets(settings);
     initializeSettingsSync(settings);
+    if (prunedBuckets) {
+        log(`Pruned ${prunedBuckets} stale per-chat cache bucket${prunedBuckets === 1 ? '' : 's'}`);
+        queueWeyPhoneSave(context);
+    }
     initPanel();
     syncAlarmTick(settings); // resume watching any enabled real alarms from a previous session
     log('WeyPhone initialized');
