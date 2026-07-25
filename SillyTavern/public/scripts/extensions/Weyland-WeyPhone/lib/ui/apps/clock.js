@@ -296,7 +296,6 @@ export function renderClockScreen(container, { tab, timers, alarms, runtimeOf, d
             ? `<div class="wp-empty-state"><i class="fa-solid fa-bell wp-empty-state-icon"></i><div>No alarms yet. Tap + to add one.</div></div>`
             : `<div class="wp-alarm-list">${alarms.map(alarmCardMarkup).join('')}</div>`;
         body = `
-<div class="wp-clock-note"><i class="fa-solid fa-circle-info"></i> Set alarms up now — ringing and roleplay time arrive in the next update.</div>
 ${list}
 <button type="button" id="wp-alarm-add" class="wp-fab" title="New alarm"><i class="fa-solid fa-plus"></i></button>`;
     } else {
@@ -304,7 +303,6 @@ ${list}
             ? `<div class="wp-empty-state"><i class="fa-solid fa-hourglass-half wp-empty-state-icon"></i><div>No timers yet. Tap + to add one.</div></div>`
             : `<div class="wp-timer-list">${timers.map(timer => timerCardMarkup(timer, runtimeOf(timer))).join('')}</div>`;
         body = `
-<div class="wp-clock-note"><i class="fa-solid fa-circle-info"></i> Timers run on real or roleplay time. The alert popup &amp; sound arrive in the next update.</div>
 ${list}
 <button type="button" id="wp-timer-add" class="wp-fab" title="New timer"><i class="fa-solid fa-plus"></i></button>`;
     }
@@ -487,7 +485,7 @@ export function renderAlarmEditorScreen(container, { alarm, isNew, chatOpen = tr
             ${modeOption(TIME_MODE.REAL, 'Real time')}
             ${modeOption(TIME_MODE.RP, 'Roleplay time', !chatOpen)}
         </select>
-        <small class="wp-settings-hint">${chatOpen ? 'RP alarms live in this chat only. Ringing arrives in a later update.' : 'Open a roleplay chat to use roleplay time.'}</small>
+        <small class="wp-settings-hint">${chatOpen ? 'RP alarms live in this chat only.' : 'Open a roleplay chat to use roleplay time.'}</small>
     </label>
     ${soundTriggerMarkup(alarm.soundUrl)}
     ${imageTriggerMarkup(alarm.imageUrl)}
