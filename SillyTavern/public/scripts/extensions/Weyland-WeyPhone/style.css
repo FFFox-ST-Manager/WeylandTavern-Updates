@@ -3811,14 +3811,6 @@
     color: color-mix(in srgb, var(--wp-app-accent) 82%, white);
     background: color-mix(in srgb, var(--wp-surface-2) 70%, var(--wp-app-accent));
 }
-.wp-clock-note {
-    display: flex; align-items: center; gap: 7px;
-    font-size: 11px; line-height: 1.35;
-    color: var(--wp-text-dim);
-    background: color-mix(in srgb, var(--wp-surface) 90%, var(--wp-app-accent));
-    border-radius: 8px; padding: 7px 9px;
-}
-.wp-clock-note i { opacity: 0.8; }
 
 .wp-timer-list { display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
 
