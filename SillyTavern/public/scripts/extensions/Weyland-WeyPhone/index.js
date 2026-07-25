@@ -114,6 +114,10 @@ let alertSound = null;
 const alarmNextFire = new Map();
 let alarmTickHandle = null;
 const ALARM_SNOOZE_MS = 5 * 60 * 1000;
+// When an RP alarm fires, a one-shot system note is injected into the next roleplay generation so
+// the story reacts to it (e.g. wakes {{user}}). Consumed + cleared by the generate interceptor.
+const RP_ALARM_INJECT_KEY = 'weyphone_rp_alarm';
+let pendingAlarmInjection = null;
 // Sound/image picker: which field ('sound'), which editor to return to, the fetched list (null =
 // loading), and a transient preview-audio handle.
 let pickerField = null;
@@ -3967,6 +3971,14 @@ function armRpAlarm(alarm, from) {
     return { armedFrom: from, targetMinutes: mins };
 }
 
+/** The one-shot roleplay note injected when an RP alarm fires (dynamic name + time). */
+function alarmInjectionText(alarm, userName) {
+    const h = alarm.hour % 12 || 12;
+    const time = `${h}:${String(alarm.minute).padStart(2, '0')} ${alarm.hour < 12 ? 'AM' : 'PM'}`;
+    const name = alarm.title?.trim() || 'Alarm';
+    return `[WEYPHONE ALARM] ${userName}'s phone alarm "${name}" is set to go off at ${time}. If they're asleep or occupied, let it intrude on the scene and react naturally.`;
+}
+
 // Fire RP alarms whose story-time target has been reached, on each new message in their chat. Timing
 // is measured forward from a persisted armedFrom moment, so it survives reload. The alarm is advanced
 // on Dismiss/Snooze (not here); the going-off dedup keeps repeat alerts from stacking meanwhile.
@@ -3993,6 +4005,12 @@ function refreshRpAlarmsOnMessage() {
     }
     if (changed) queueWeyPhoneSave(context);
     for (const alarm of fired) fireAlarmAlert(alarm);
+    if (fired.length) {
+        // Every RP alarm also injects a one-shot note so the roleplay reacts to it going off.
+        const userName = context.name1 || 'User';
+        const notes = fired.map(alarm => alarmInjectionText(alarm, userName));
+        pendingAlarmInjection = [pendingAlarmInjection, ...notes].filter(Boolean).join('\n');
+    }
     if (fired.length === 0 && changed && currentView === 'clock' && currentClockTab === 'alarms') showScreen('clock');
 }
 
@@ -5338,6 +5356,10 @@ async function weyPhoneMainChatInterceptor() {
             context.setExtensionPrompt(op.key, op.content, op.position, op.depth, op.scan ?? false, op.role);
         }
         tetherPromptKeys = reconciled.nextKeys;
+        // One-shot RP-alarm note: inject it into this generation (IN_CHAT depth 0, system role) then
+        // clear it, so an alarm that went off makes the story react exactly once. Empty = cleared.
+        context.setExtensionPrompt(RP_ALARM_INJECT_KEY, pendingAlarmInjection || '', 1, 0, false, 0);
+        pendingAlarmInjection = null;
     } catch (error) {
         console.error('[WeyPhone] Roleplay text injection failed:', error);
     }
