@@ -179,6 +179,29 @@ export function renderCharacterWallpapersScreen(container, { settings }) {
 }
 
 /**
+ * A folder-backed wallpaper gallery (Greetings or FFFox). `images` is null while loading, else an
+ * array of URLs. Selecting a tile sets it as the phone wallpaper (see index.js).
+ * @param {HTMLElement} container #wp-screen-body
+ * @param {{title: string, emptyHint: string, images: string[]|null, currentValue: string}} state
+ */
+export function renderFolderWallpapersScreen(container, { title, emptyHint, images, currentValue }) {
+    let grid;
+    if (images === null) grid = '<div class="wp-settings-hint">Loading…</div>';
+    else if (images.length === 0) grid = `<div class="wp-settings-hint">${escapeHtml(emptyHint)}</div>`;
+    else grid = `<div class="wp-folder-wallpaper-grid">${images.map(url => `
+        <button type="button" class="wp-folder-wallpaper-card${currentValue === url ? ' wp-selected' : ''}" data-wallpaper-url="${escapeHtml(url)}">
+            <img src="${escapeHtml(url)}" alt="" loading="lazy" />
+        </button>`).join('')}</div>`;
+    container.innerHTML = `
+<div class="wp-settings">
+    <div class="wp-settings-section">
+        <div class="wp-settings-section-title">${escapeHtml(title)}</div>
+        ${grid}
+    </div>
+</div>`;
+}
+
+/**
  * The Settings app: one scrolling screen of sections.
  * @param {HTMLElement} container #wp-screen-body
  * @param {{
@@ -206,6 +229,14 @@ export function renderSettingsScreen(container, { settings, currentLiveModel, lo
     </div>
     <button type="button" id="wp-character-wallpapers-button" class="wp-settings-link-row wp-character-wallpapers-link">
         <span>Character wallpapers <small>Browse an alphabetical gallery and adjust each image's focus.</small></span>
+        <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+    </button>
+    <button type="button" id="wp-greetings-wallpapers-button" class="wp-settings-link-row">
+        <span>Greetings wallpapers <small>Use a Weyland greeting image as your wallpaper.</small></span>
+        <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+    </button>
+    <button type="button" id="wp-fffox-wallpapers-button" class="wp-settings-link-row">
+        <span>FFFox wallpapers <small>Wallpapers curated by FFFox.</small></span>
         <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
     </button>
     <input id="wp-settings-wallpaper-url" type="text" placeholder="…or paste a custom image URL" value="${isCustomWallpaper ? escapeHtml(wallpaperValue) : ''}" />
@@ -242,16 +273,8 @@ export function renderSettingsScreen(container, { settings, currentLiveModel, lo
     </button>
 </div>`;
 
-    const clockSection = `
-<div class="wp-settings-section">
-    <div class="wp-settings-section-title">Clock</div>
-    ${toggleRowMarkup({
-        id: 'wp-settings-rpclock',
-        label: 'Roleplay time',
-        sub: 'Read the clock from the latest scene header',
-        checked: Boolean(settings.ui?.rpClockEnabled),
-    })}
-</div>`;
+    // The Roleplay-time clock toggle moved to the Clock app's "Time source" control (it now drives
+    // both the phone's displayed clock and the default for new timers/alarms).
 
     const batterySection = `
 <div class="wp-settings-section">
@@ -381,7 +404,6 @@ export function renderSettingsScreen(container, { settings, currentLiveModel, lo
     container.innerHTML = `
 <div class="wp-settings">
     ${wallpaperSection}
-    ${clockSection}
     ${batterySection}
     ${tetherSection}
     ${rateLimitSection}

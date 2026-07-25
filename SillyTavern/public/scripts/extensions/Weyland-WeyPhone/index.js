@@ -15,7 +15,7 @@ import { TEXTING_MODE_INSTRUCTIONS, TEXTING_THOUGHTS_DISABLED } from './lib/text
 import { FIRST_CONTACT_BLOCK } from './lib/firstContact.js';
 import { isKnownByDefault } from './lib/knownContacts.js';
 import { buildMemoryGenerationMessages, joinMemoriesForInjection, sendMemoryRequest } from './lib/memoryGeneration.js';
-import { isMainRoleplayActive, resolveMainActiveLtmEntries, resolveMainHistorySlice, formatMainHistoryTranscript, buildTetheredViewBlock, convertMainChatToMessages, buildScanHistoryWithExtraText, KRESSA_ROLEPLAY_COMPANION_INSTRUCTIONS, KRESSA_POST_CHATLOG_ORIENTATION } from './lib/tetheredContext.js';
+import { isMainRoleplayActive, resolveMainActiveLtmEntries, resolveMainHistorySlice, formatMainHistoryTranscript, buildTetheredViewBlock, convertMainChatToMessages, buildScanHistoryWithExtraText, KRESSA_ROLEPLAY_COMPANION_INSTRUCTIONS } from './lib/tetheredContext.js';
 import { getPhoneAppContent, setPhoneAppContent } from './lib/phoneApps.js';
 import { toggleLike } from './lib/twitterLikes.js';
 import { parseTwitterPosts } from './lib/twitterParsing.js';
@@ -648,7 +648,10 @@ async function buildTetheredContext(context, conversation, { kressaObserver = fa
         worldInfoText: worldInfo,
         ltmEntries,
         historyTranscript,
-        postTranscriptInstructions: kressaObserver ? KRESSA_POST_CHATLOG_ORIENTATION : '',
+        // NOTE: Lucky's "post-chatlog orientation" refinement (postTranscriptInstructions:
+        // KRESSA_POST_CHATLOG_ORIENTATION) needs his updated tetheredContext.js — the const and the
+        // buildTetheredViewBlock param that consumes it were never delivered. Restore both lines
+        // (here and the import) once that file lands.
     });
 }
 
