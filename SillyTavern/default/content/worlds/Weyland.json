@@ -942,12 +942,7 @@
             "matchScenario": false,
             "matchCreatorNotes": false,
             "ignoreBudget": false,
-            "triggers": [],
-            "characterFilter": {
-                "isExclude": false,
-                "names": [],
-                "tags": []
-            }
+            "triggers": []
         },
         "13": {
             "key": [
@@ -1982,7 +1977,7 @@
             "group": "",
             "groupOverride": false,
             "groupWeight": 100,
-            "scanDepth": 1,
+            "scanDepth": 2,
             "caseSensitive": null,
             "matchWholeWords": null,
             "useGroupScoring": false,
@@ -19445,6 +19440,11 @@
                 "sticky": 2,
                 "cooldown": 0,
                 "delay": 0
+            },
+            "characterFilter": {
+                "isExclude": false,
+                "names": [],
+                "tags": []
             }
         },
         "258": {
