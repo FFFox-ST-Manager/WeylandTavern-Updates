@@ -1111,7 +1111,8 @@ Dated Nix at start of Freshman, but ended getting dumped.`, true);
         setLocalVariable("LENS", strings.rsbLENS, true);
         setLocalVariable("OKSA", strings.rsbOKSA, true);
         setLocalVariable("MONTE", strings.rsbMONTE, true);
-        setLocalVariable("BRIET", strings.rsbBRIET);
+        setLocalVariable("BRIET", strings.rsbBRIET, true);
+        setLocalVariable("TORY", strings.rsbTORY, true);
 
         DebugLog(`[P] RosterSB: ${(performance.now()-PerformanceStart).toFixed(4)}ms`);
     } catch (error) {
