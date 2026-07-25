@@ -114,6 +114,14 @@ let alertSound = null;
 const alarmNextFire = new Map();
 let alarmTickHandle = null;
 const ALARM_SNOOZE_MS = 5 * 60 * 1000;
+// When an RP alarm fires, a one-shot system note is injected into the next roleplay generation so
+// the story reacts to it (e.g. wakes {{user}}). Consumed + cleared by the generate interceptor.
+const RP_ALARM_INJECT_KEY = 'weyphone_rp_alarm';
+let pendingAlarmInjection = null;       // LATE one-shot note(s) for alarm(s) that already fired
+let earlyInjectAlarmId = null;          // the single closest alarm currently getting the EARLY note
+// Only the closest alarm within ~2 story-days gets the forward/early note (covers "today or
+// tomorrow", so a sleep time-skip still rings on time). Anything further stays late-only until closer.
+const EARLY_INJECT_WINDOW_MIN = 2 * 24 * 60;
 // Sound/image picker: which field ('sound'), which editor to return to, the fetched list (null =
 // loading), and a transient preview-audio handle.
 let pickerField = null;
@@ -3967,6 +3975,44 @@ function armRpAlarm(alarm, from) {
     return { armedFrom: from, targetMinutes: mins };
 }
 
+function alarmTimeLabel(alarm) {
+    const h = alarm.hour % 12 || 12;
+    return `${h}:${String(alarm.minute).padStart(2, '0')} ${alarm.hour < 12 ? 'AM' : 'PM'}`;
+}
+
+/** LATE note: an RP alarm already fired this turn — react to it going off (used for non-closest ones). */
+function alarmInjectionText(alarm, userName) {
+    const name = alarm.title?.trim() || 'Alarm';
+    return `[WEYPHONE ALARM] ${userName}'s phone alarm "${name}" is set to go off at ${alarmTimeLabel(alarm)}. If they're asleep or occupied, let it intrude on the scene and react naturally.`;
+}
+
+/** EARLY note: a standing instruction so the AI rings the alarm in the very turn the scene reaches it. */
+function earlyAlarmInjectionText(alarm, userName) {
+    const name = alarm.title?.trim() || 'Alarm';
+    const time = alarmTimeLabel(alarm);
+    return `[WEYPHONE ALARM] ${userName} has a phone alarm set for ${time} ("${name}"). Don't mention or trigger it until the scene's clock reaches ${time}; then have it go off and wake them.`;
+}
+
+/**
+ * The single closest enabled RP alarm (in this chat) within the early-injection window, for the
+ * forward "ring when reached" note. Returns { id, text } or null.
+ */
+function computeEarlyAlarmInjection(context, settings) {
+    const moment = currentRpMoment(context.chat);
+    if (!moment) return null;
+    let closest = null;
+    let minRemaining = Infinity;
+    for (const alarm of getVisibleAlarms(settings, context.chatId)) {
+        if (!alarm.enabled || effectiveTimeMode(settings, alarm) !== 'rp' || !alarm.rpArm) continue;
+        const elapsed = rpMinutesBetween(alarm.rpArm.armedFrom, moment);
+        if (elapsed === null) continue;
+        const remaining = alarm.rpArm.targetMinutes - elapsed;
+        if (remaining > 0 && remaining < minRemaining) { minRemaining = remaining; closest = alarm; }
+    }
+    if (!closest || minRemaining > EARLY_INJECT_WINDOW_MIN) return null;
+    return { id: closest.id, text: earlyAlarmInjectionText(closest, context.name1 || 'User') };
+}
+
 // Fire RP alarms whose story-time target has been reached, on each new message in their chat. Timing
 // is measured forward from a persisted armedFrom moment, so it survives reload. The alarm is advanced
 // on Dismiss/Snooze (not here); the going-off dedup keeps repeat alerts from stacking meanwhile.
@@ -3993,6 +4039,13 @@ function refreshRpAlarmsOnMessage() {
     }
     if (changed) queueWeyPhoneSave(context);
     for (const alarm of fired) fireAlarmAlert(alarm);
+    if (fired.length) {
+        // The closest alarm already had the EARLY (forward) note, so it should have rung in-scene;
+        // only the others need the LATE one-shot note so simultaneous fires still react.
+        const userName = context.name1 || 'User';
+        const notes = fired.filter(alarm => alarm.id !== earlyInjectAlarmId).map(alarm => alarmInjectionText(alarm, userName));
+        if (notes.length) pendingAlarmInjection = [pendingAlarmInjection, ...notes].filter(Boolean).join('\n');
+    }
     if (fired.length === 0 && changed && currentView === 'clock' && currentClockTab === 'alarms') showScreen('clock');
 }
 
@@ -5338,6 +5391,14 @@ async function weyPhoneMainChatInterceptor() {
             context.setExtensionPrompt(op.key, op.content, op.position, op.depth, op.scan ?? false, op.role);
         }
         tetherPromptKeys = reconciled.nextKeys;
+        // RP-alarm note (IN_CHAT depth 0, system role). EARLY: a standing "ring when reached" note for
+        // the closest upcoming alarm (recomputed each turn, so it rings on time in the crossing turn).
+        // LATE: any one-shot note for alarms that already fired (consumed once). Empty = cleared.
+        const early = computeEarlyAlarmInjection(context, settings);
+        earlyInjectAlarmId = early?.id ?? null;
+        const alarmNote = [early?.text, pendingAlarmInjection].filter(Boolean).join('\n');
+        context.setExtensionPrompt(RP_ALARM_INJECT_KEY, alarmNote || '', 1, 0, false, 0);
+        pendingAlarmInjection = null;
     } catch (error) {
         console.error('[WeyPhone] Roleplay text injection failed:', error);
     }
