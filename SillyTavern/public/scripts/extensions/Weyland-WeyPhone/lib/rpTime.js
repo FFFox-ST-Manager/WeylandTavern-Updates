@@ -21,6 +21,12 @@ const MONTHS = {
 };
 
 const BASE_YEAR = 2000; // arbitrary anchor for yearless moments; only relative distance matters
+// A yearless "b earlier than a" is only treated as a forward year-end wrap (Dec 31 -> Jan 1) when
+// rolling b forward a year lands within this window. A larger apparent-backward gap is a genuine
+// backward move — a flashback, or a re-gen with an earlier header — and is kept negative so RP
+// alarms/timers wait rather than misfiring. 90 days comfortably covers real forward time-skips while
+// rejecting any plausible flashback (which would have to be >9 months back to be mistaken for a wrap).
+const FORWARD_WRAP_MAX_MS = 90 * 24 * 60 * 60 * 1000;
 
 /**
  * Parse a parsed RP header into a moment. Returns null if the date or time can't be read.
@@ -67,12 +73,16 @@ export function rpMinutesBetween(a, b) {
     if (!a || !b) return null;
     const aYear = a.year ?? BASE_YEAR;
     // A yearless b inherits a's year so same-year distances are exact; a's own year if it had one.
-    let bYear = b.year ?? (a.year ?? BASE_YEAR);
+    const bYear = b.year ?? (a.year ?? BASE_YEAR);
     const aMs = Date.UTC(aYear, a.month, a.day, a.hour, a.minute);
-    let bMs = Date.UTC(bYear, b.month, b.day, b.hour, b.minute);
-    // Only roll forward when the year was inferred for both sides — never override real years.
-    if (bMs < aMs && a.year == null && b.year == null) {
-        bMs = Date.UTC(bYear + 1, b.month, b.day, b.hour, b.minute);
+    const bMs = Date.UTC(bYear, b.month, b.day, b.hour, b.minute);
+    let diff = bMs - aMs;
+    // Both years inferred and b looks earlier: could be a year-end wrap OR a backward move. Only roll
+    // b forward a year when doing so gives a SMALL forward gap (a genuine crossing). Never override
+    // real years, and never turn a plain backward jump into a huge fake forward distance.
+    if (diff < 0 && a.year == null && b.year == null) {
+        const rolledDiff = Date.UTC(bYear + 1, b.month, b.day, b.hour, b.minute) - aMs;
+        if (rolledDiff >= 0 && rolledDiff <= FORWARD_WRAP_MAX_MS) diff = rolledDiff;
     }
-    return Math.round((bMs - aMs) / 60000);
+    return Math.round(diff / 60000);
 }
