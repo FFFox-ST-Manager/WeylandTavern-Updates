@@ -942,7 +942,12 @@
             "matchScenario": false,
             "matchCreatorNotes": false,
             "ignoreBudget": false,
-            "triggers": []
+            "triggers": [],
+            "characterFilter": {
+                "isExclude": false,
+                "names": [],
+                "tags": []
+            }
         },
         "13": {
             "key": [
@@ -4153,7 +4158,7 @@
             "sticky": 2,
             "cooldown": 0,
             "delay": 0,
-            "displayIndex": 192,
+            "displayIndex": 193,
             "extensions": {
                 "position": 1,
                 "exclude_recursion": false,
@@ -6618,7 +6623,7 @@
             "sticky": 0,
             "cooldown": 0,
             "delay": 0,
-            "displayIndex": 197,
+            "displayIndex": 198,
             "extensions": {
                 "position": 1,
                 "exclude_recursion": false,
@@ -6771,7 +6776,7 @@
             "sticky": 0,
             "cooldown": 0,
             "delay": 0,
-            "displayIndex": 218,
+            "displayIndex": 224,
             "extensions": {
                 "position": 1,
                 "exclude_recursion": false,
@@ -6924,7 +6929,7 @@
             "sticky": 0,
             "cooldown": 0,
             "delay": 0,
-            "displayIndex": 219,
+            "displayIndex": 225,
             "extensions": {
                 "position": 1,
                 "exclude_recursion": false,
@@ -7076,7 +7081,7 @@
             "sticky": 0,
             "cooldown": 0,
             "delay": 0,
-            "displayIndex": 201,
+            "displayIndex": 207,
             "extensions": {
                 "position": 1,
                 "exclude_recursion": false,
@@ -7229,7 +7234,7 @@
             "sticky": 0,
             "cooldown": 0,
             "delay": 0,
-            "displayIndex": 213,
+            "displayIndex": 219,
             "extensions": {
                 "position": 1,
                 "exclude_recursion": false,
@@ -7382,7 +7387,7 @@
             "sticky": 0,
             "cooldown": 0,
             "delay": 0,
-            "displayIndex": 220,
+            "displayIndex": 226,
             "extensions": {
                 "position": 1,
                 "exclude_recursion": false,
@@ -14883,7 +14888,7 @@
             "cooldown": 0,
             "delay": 0,
             "triggers": [],
-            "displayIndex": 215,
+            "displayIndex": 221,
             "extensions": {
                 "position": 1,
                 "exclude_recursion": false,
@@ -15009,7 +15014,7 @@
             "cooldown": 0,
             "delay": 0,
             "triggers": [],
-            "displayIndex": 216,
+            "displayIndex": 222,
             "extensions": {
                 "position": 1,
                 "exclude_recursion": false,
@@ -15087,7 +15092,7 @@
             "cooldown": 0,
             "delay": 0,
             "triggers": [],
-            "displayIndex": 217,
+            "displayIndex": 223,
             "extensions": {
                 "position": 1,
                 "exclude_recursion": false,
@@ -15162,7 +15167,7 @@
             "cooldown": 0,
             "delay": 0,
             "triggers": [],
-            "displayIndex": 194,
+            "displayIndex": 195,
             "extensions": {
                 "position": 1,
                 "exclude_recursion": false,
@@ -15237,7 +15242,7 @@
             "cooldown": 0,
             "delay": 0,
             "triggers": [],
-            "displayIndex": 202,
+            "displayIndex": 208,
             "extensions": {
                 "position": 1,
                 "exclude_recursion": false,
@@ -15465,7 +15470,7 @@
             "cooldown": 0,
             "delay": 0,
             "triggers": [],
-            "displayIndex": 212,
+            "displayIndex": 218,
             "extensions": {
                 "position": 1,
                 "exclude_recursion": false,
@@ -16181,7 +16186,7 @@
             "cooldown": 0,
             "delay": 0,
             "triggers": [],
-            "displayIndex": 198,
+            "displayIndex": 199,
             "extensions": {
                 "position": 1,
                 "exclude_recursion": false,
@@ -16258,7 +16263,7 @@
             "cooldown": 0,
             "delay": 0,
             "triggers": [],
-            "displayIndex": 199,
+            "displayIndex": 200,
             "extensions": {
                 "position": 1,
                 "exclude_recursion": false,
@@ -16333,7 +16338,7 @@
             "cooldown": 0,
             "delay": 0,
             "triggers": [],
-            "displayIndex": 196,
+            "displayIndex": 197,
             "extensions": {
                 "position": 1,
                 "exclude_recursion": false,
@@ -16408,7 +16413,7 @@
             "cooldown": 0,
             "delay": 0,
             "triggers": [],
-            "displayIndex": 200,
+            "displayIndex": 206,
             "extensions": {
                 "position": 1,
                 "exclude_recursion": false,
@@ -16488,7 +16493,7 @@
             "cooldown": 0,
             "delay": 0,
             "triggers": [],
-            "displayIndex": 193,
+            "displayIndex": 194,
             "extensions": {
                 "position": 1,
                 "exclude_recursion": false,
@@ -17491,7 +17496,7 @@
             "cooldown": 0,
             "delay": 0,
             "triggers": [],
-            "displayIndex": 195,
+            "displayIndex": 196,
             "extensions": {
                 "position": 1,
                 "exclude_recursion": false,
@@ -17566,7 +17571,7 @@
             "cooldown": 0,
             "delay": 0,
             "triggers": [],
-            "displayIndex": 203,
+            "displayIndex": 209,
             "extensions": {
                 "position": 1,
                 "exclude_recursion": false,
@@ -17641,7 +17646,7 @@
             "cooldown": 0,
             "delay": 0,
             "triggers": [],
-            "displayIndex": 204,
+            "displayIndex": 210,
             "extensions": {
                 "position": 1,
                 "exclude_recursion": false,
@@ -17716,7 +17721,7 @@
             "cooldown": 0,
             "delay": 0,
             "triggers": [],
-            "displayIndex": 205,
+            "displayIndex": 211,
             "extensions": {
                 "position": 1,
                 "exclude_recursion": false,
@@ -17791,7 +17796,7 @@
             "cooldown": 0,
             "delay": 0,
             "triggers": [],
-            "displayIndex": 207,
+            "displayIndex": 213,
             "extensions": {
                 "position": 1,
                 "exclude_recursion": false,
@@ -17868,7 +17873,7 @@
             "cooldown": 0,
             "delay": 0,
             "triggers": [],
-            "displayIndex": 206,
+            "displayIndex": 212,
             "extensions": {
                 "position": 1,
                 "exclude_recursion": false,
@@ -17945,7 +17950,7 @@
             "cooldown": 0,
             "delay": 0,
             "triggers": [],
-            "displayIndex": 208,
+            "displayIndex": 214,
             "extensions": {
                 "position": 1,
                 "exclude_recursion": false,
@@ -18022,7 +18027,7 @@
             "cooldown": 0,
             "delay": 0,
             "triggers": [],
-            "displayIndex": 209,
+            "displayIndex": 215,
             "extensions": {
                 "position": 1,
                 "exclude_recursion": false,
@@ -18099,7 +18104,7 @@
             "cooldown": 0,
             "delay": 0,
             "triggers": [],
-            "displayIndex": 210,
+            "displayIndex": 216,
             "extensions": {
                 "position": 1,
                 "exclude_recursion": false,
@@ -18490,7 +18495,7 @@
             "cooldown": 0,
             "delay": 0,
             "triggers": [],
-            "displayIndex": 214,
+            "displayIndex": 220,
             "extensions": {
                 "position": 1,
                 "exclude_recursion": false,
@@ -18722,7 +18727,7 @@
             "cooldown": 0,
             "delay": 0,
             "triggers": [],
-            "displayIndex": 211,
+            "displayIndex": 217,
             "extensions": {
                 "position": 1,
                 "exclude_recursion": false,
@@ -19025,7 +19030,7 @@
             "cooldown": 0,
             "delay": 0,
             "triggers": [],
-            "displayIndex": 199,
+            "displayIndex": 201,
             "extensions": {
                 "position": 1,
                 "exclude_recursion": false,
@@ -19105,7 +19110,7 @@
             "cooldown": 0,
             "delay": 0,
             "triggers": [],
-            "displayIndex": 199,
+            "displayIndex": 202,
             "extensions": {
                 "position": 1,
                 "exclude_recursion": false,
@@ -19179,7 +19184,7 @@
             "cooldown": 0,
             "delay": 0,
             "triggers": [],
-            "displayIndex": 199,
+            "displayIndex": 203,
             "extensions": {
                 "position": 1,
                 "exclude_recursion": false,
@@ -19258,7 +19263,7 @@
             "cooldown": 0,
             "delay": 0,
             "triggers": [],
-            "displayIndex": 199,
+            "displayIndex": 204,
             "extensions": {
                 "position": 1,
                 "exclude_recursion": false,
@@ -19338,7 +19343,7 @@
             "cooldown": 0,
             "delay": 0,
             "triggers": [],
-            "displayIndex": 199,
+            "displayIndex": 205,
             "extensions": {
                 "position": 1,
                 "exclude_recursion": false,
@@ -19522,6 +19527,87 @@
             },
             "characterFilter": {
                 "isExclude": false,
+                "names": [],
+                "tags": []
+            }
+        },
+        "259": {
+            "uid": 259,
+            "key": [
+                "!Torylyn",
+                "!torylyn",
+                "Torylyn",
+                "Oribasa",
+                "!Tor",
+                "!tor",
+                "Tor",
+                "Vera's father",
+                "Deredra"
+            ],
+            "keysecondary": [],
+            "comment": "Torylyn Oribasa",
+            "content": "{{getvar::TORY}}",
+            "constant": false,
+            "vectorized": false,
+            "selective": true,
+            "selectiveLogic": 0,
+            "addMemo": true,
+            "order": 100,
+            "position": 1,
+            "disable": false,
+            "ignoreBudget": false,
+            "excludeRecursion": false,
+            "preventRecursion": true,
+            "matchPersonaDescription": false,
+            "matchCharacterDescription": false,
+            "matchCharacterPersonality": false,
+            "matchCharacterDepthPrompt": false,
+            "matchScenario": false,
+            "matchCreatorNotes": false,
+            "delayUntilRecursion": false,
+            "probability": 100,
+            "useProbability": true,
+            "depth": 4,
+            "group": "",
+            "groupOverride": false,
+            "groupWeight": 100,
+            "scanDepth": 2,
+            "caseSensitive": false,
+            "matchWholeWords": null,
+            "useGroupScoring": false,
+            "automationId": "",
+            "role": null,
+            "sticky": 0,
+            "cooldown": 0,
+            "delay": 0,
+            "triggers": [],
+            "displayIndex": 192,
+            "extensions": {
+                "position": 1,
+                "exclude_recursion": false,
+                "display_index": 149,
+                "probability": 100,
+                "useProbability": true,
+                "depth": 4,
+                "selectiveLogic": 0,
+                "group": "",
+                "group_override": false,
+                "group_weight": 100,
+                "prevent_recursion": true,
+                "delay_until_recursion": false,
+                "scan_depth": 2,
+                "match_whole_words": null,
+                "use_group_scoring": false,
+                "case_sensitive": true,
+                "automation_id": "",
+                "role": 0,
+                "vectorized": false,
+                "sticky": 0,
+                "cooldown": 0,
+                "delay": 0
+            },
+            "characterFilter": {
+                "isExclude": true,
                 "names": [],
                 "tags": []
             }
