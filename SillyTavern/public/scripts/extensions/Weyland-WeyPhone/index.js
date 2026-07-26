@@ -4280,14 +4280,23 @@ async function loadPickerItems(field) {
     if (currentView === 'clock-picker' && pickerField === field) showScreen('clock-picker'); // refresh once loaded
 }
 
-/** Greeting URLs to show: always drops the NSFW.avif censor sticker; drops NSFW greetings when SFW. */
+// The Weyland greeting folder holds real greeting backgrounds alongside other assets. Backgrounds are
+// the 3-digit files 000–799; 099, 147, and 154 are literal phone screenshots, not usable wallpapers.
+const EXCLUDED_GREETINGS = new Set(['099', '147', '154']);
+
+/**
+ * Greeting URLs to show as wallpaper / alarm images. Keeps only real greeting backgrounds — 3-digit
+ * filenames 000–799, minus the phone-screenshot files — then drops NSFW greetings while SFW. The
+ * 3-digit rule also removes the NSFW.avif censor sticker and any non-numeric or 800+ asset.
+ */
 function filterGreetings(urls) {
     if (urls === null) return null;
     const nsfw = isNsfwEnabled();
     return urls.filter(url => {
         const base = String(url).split('/').pop()?.replace(/\.[^.]+$/, '') ?? '';
-        if (base.toUpperCase() === 'NSFW') return false;   // the censor sticker is never a choice
-        if (!nsfw && isNsfwGreeting(url)) return false;     // hide NSFW greetings while SFW
+        if (!/^\d{3}$/.test(base) || Number(base) > 799) return false; // real greetings are 000–799
+        if (EXCLUDED_GREETINGS.has(base)) return false;                // literal phone screenshots
+        if (!nsfw && isNsfwGreeting(url)) return false;                // hide NSFW greetings while SFW
         return true;
     });
 }
@@ -4679,7 +4688,9 @@ function showScreen(view) {
         const imgNav = pickerField === 'image'
             ? { level: imgLevel, char: imgChar, characters: imgCharacters, costumeData: imgCostumeData }
             : undefined;
-        const items = pickerField === 'image' ? filterGreetings(pickerItems) : pickerItems;
+        // Only the greetings level gets the greeting filter; costume/character levels pass through
+        // (their images aren't 3-digit-named and are already NSFW-scoped at probe time).
+        const items = pickerField === 'image' && imgLevel === 'greetings' ? filterGreetings(pickerItems) : pickerItems;
         renderClockPickerScreen(screenBody, { field: pickerField, items, currentValue, imgNav });
         return;
     }
