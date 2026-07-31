@@ -7,7 +7,9 @@
 
 // Match WT-HelixUsage's real endpoint and response format. The earlier quota endpoint used a
 // different service schema, so it could never supply WeyPhone with a valid battery number.
-export const QUOTA_ENDPOINT = 'https://helixmind.online/v1/usage';
+// After the HelixMind backend migration the per-key quota lives at /v1/usage/quota, which
+// returns the used/limit counts directly instead of a list of timestamped records.
+export const QUOTA_ENDPOINT = 'https://helixmind.online/v1/usage/quota';
 export const QUOTA_CACHE_MS = 2 * 60_000;
 export const QUOTA_FETCH_TIMEOUT_MS = 8_000;
 
@@ -39,13 +41,15 @@ export async function fetchMessageQuota(apiKey, fetchFn = fetch, { timeoutMs = Q
         });
         if (!response.ok) return null;
         const payload = await response.json();
-        if (payload?.limit === '') return null;
-        const limit = Number.parseInt(payload?.limit, 10);
-        if (!Number.isFinite(limit)) return null;
-        const cutoff = now() - 24 * 60 * 60_000;
-        const used = Array.isArray(payload?.data)
-            ? payload.data.filter(item => Number(item?.timestamp) * 1000 >= cutoff).length
-            : 0;
+        // New backend shape: { global_rpd: { used, limit }, global_rpm: {...}, ... }.
+        // This replaces the old { limit, data[] } response, where remaining had to be
+        // derived by counting timestamped records inside a rolling 24h window.
+        const rpd = payload?.global_rpd;
+        const limit = Number(rpd?.limit);
+        const used = Number(rpd?.used);
+        // limit <= 0 is treated as unusable (and covers a possible unlimited-key signal)
+        // until a live unlimited response confirms how the new backend represents "no cap".
+        if (!Number.isFinite(limit) || limit <= 0 || !Number.isFinite(used)) return null;
         return { remaining: Math.max(0, limit - used), limit };
     } catch {
         return null;

@@ -30,8 +30,57 @@ function formatMillisecondsToTime(ms) {
     return `${pad(minutes)}:${pad(seconds)}`;
 }
 
+const WELCOME_HELIX_QUOTA_ENDPOINT = 'https://helixmind.online/v1/usage/quota';
+const WELCOME_HELIX_USAGE_ENDPOINT = 'https://helixmind.online/v1/usage';
+
+// Find the oldest usage record inside the rolling 24h window, in ms (or null).
+// The quota endpoint gives no reset timestamp, so the "next message" countdown is derived
+// from when the oldest request ages out of the window and frees a slot. The records API
+// guarantees no sort order, so we page through and take the minimum created_at. Fails
+// soft: any error/empty result yields null, which the caller renders as "Ready" — a wrong
+// timer never surfaces, at worst the countdown is briefly absent. (Twin of the same helper
+// in WT-HelixUsage/helix_usage.js.)
+async function fetchWelcomeOldestHelixTimestampMs(apiKey) {
+    const sinceIso = new Date(Date.now() - (24 * 60 * 60 * 1000)).toISOString();
+    let cursor = null;
+    let oldestMs = null;
+
+    for (let page = 0; page < 10; page++) {
+        const url = new URL(WELCOME_HELIX_USAGE_ENDPOINT);
+        url.searchParams.set('since', sinceIso);
+        url.searchParams.set('limit', '100');
+        if (cursor) {
+            url.searchParams.set('cursor', cursor);
+        }
+
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: { Authorization: `Bearer ${apiKey}` },
+        });
+        if (!response.ok) {
+            break;
+        }
+
+        const parsed = await response.json();
+        const records = Array.isArray(parsed?.data) ? parsed.data : [];
+        for (const record of records) {
+            const ms = new Date(record?.created_at).getTime();
+            if (Number.isFinite(ms) && (oldestMs === null || ms < oldestMs)) {
+                oldestMs = ms;
+            }
+        }
+
+        if (!parsed?.has_more || !parsed?.next_cursor) {
+            break;
+        }
+        cursor = parsed.next_cursor;
+    }
+
+    return oldestMs;
+}
+
 async function fetchWelcomeHelixUsageData(apiKey) {
-    const response = await fetch('https://helixmind.online/v1/usage', {
+    const response = await fetch(WELCOME_HELIX_QUOTA_ENDPOINT, {
         method: 'GET',
         headers: {
             Authorization: `Bearer ${apiKey}`,
@@ -42,31 +91,27 @@ async function fetchWelcomeHelixUsageData(apiKey) {
         throw new Error(`API request failed: ${response.status} ${response.statusText}`);
     }
 
+    // New backend: { global_rpd: { used, limit }, ... }. Remaining is limit - used; the
+    // old per-record list we used to count and sort by hand is gone from this endpoint.
     const parsedResponse = await response.json();
-    const twentyFourHoursAgoMs = Date.now() - (24 * 60 * 60 * 1000);
-    let activeMessages = [];
+    const rpd = parsedResponse?.global_rpd;
+    const used = Number(rpd?.used);
+    const limit = Number(rpd?.limit);
 
-    if (parsedResponse.data && Array.isArray(parsedResponse.data)) {
-        activeMessages = parsedResponse.data
-            .map(item => ({
-                ...item,
-                timestamp_ms: item.timestamp * 1000,
-            }))
-            .filter(message => message.timestamp_ms >= twentyFourHoursAgoMs)
-            .sort((a, b) => a.timestamp_ms - b.timestamp_ms);
-    }
+    const currentUsage = Number.isFinite(used) ? used : 0;
+    // limit <= 0 (or non-numeric) is treated as unlimited/unknown until a live unlimited
+    // response confirms how the new backend signals "no cap"; Infinity keeps the existing
+    // display path that just shows the running count.
+    const totalLimit = (Number.isFinite(limit) && limit > 0) ? limit : Infinity;
 
-    let totalLimit = Infinity;
-    if (parsedResponse.limit === '') {
-        totalLimit = Infinity;
-    } else if (parsedResponse.limit && !Number.isNaN(parseInt(parsedResponse.limit, 10))) {
-        totalLimit = parseInt(parsedResponse.limit, 10);
-    }
+    // The countdown needs the oldest in-window request, and only when something's been
+    // used — at zero usage there is nothing to count down to, so skip the extra call.
+    const oldestMs = currentUsage > 0 ? await fetchWelcomeOldestHelixTimestampMs(apiKey) : null;
 
     return {
-        current_usage_count: activeMessages.length,
-        messages: activeMessages,
+        current_usage_count: currentUsage,
         total_limit: totalLimit,
+        oldest_ms: oldestMs,
     };
 }
 
@@ -135,7 +180,7 @@ async function refreshWelcomeTrackerUsage(welcomePanel) {
             messagesUsedText.textContent = `${data.current_usage_count}`;
         }
 
-        if (data.current_usage_count === 0 || !data.messages || data.messages.length === 0) {
+        if (data.current_usage_count === 0 || data.oldest_ms == null) {
             nextMessageTimeText.textContent = 'Ready';
             const nextMessageContainer = welcomePanel.querySelector('#hm-next-message-container');
             if (nextMessageContainer instanceof HTMLElement) {
@@ -150,7 +195,7 @@ async function refreshWelcomeTrackerUsage(welcomePanel) {
             nextMessageContainer.style.display = 'inline';
         }
 
-        const oldestMessageTimestampMs = data.messages[0].timestamp_ms;
+        const oldestMessageTimestampMs = data.oldest_ms;
         const calculatedExpiryTimeMs = oldestMessageTimestampMs + (24 * 60 * 60 * 1000);
 
         if (calculatedExpiryTimeMs <= Date.now()) {
