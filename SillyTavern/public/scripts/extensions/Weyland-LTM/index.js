@@ -529,7 +529,7 @@ function buildLTMPrompt(chatHistoryText, timeline = []) {
     const user = getUserName();
     const openWorld = isOpenWorldRun();
     const povMode = resolvePovMode();
-    const wtMemory = getGlobalVariable("WTMemory");
+    const wtMemory = substituteParams(getGlobalVariable("WTMemory"));
     const anchor = timeline.length ? timeline[timeline.length - 1] : null;
 
     const timelineBlock = timeline.length
