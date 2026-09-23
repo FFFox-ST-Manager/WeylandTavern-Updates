@@ -752,7 +752,16 @@ async function Scenarios(userMessage) {
 
         const greeting = getFirstMessage("char");
         const greetingText = greeting?.mes;
-        const greetingSwipe = greeting?.swipe_id;
+        let greetingSwipe = greeting?.swipe_id;
+
+        // Mirror Weyland has a single greeting; MirrorStart picks the start location instead
+        if (getCurrentCharacterName() === "Mirror Weyland") {
+            greetingSwipe = {
+                "Lecture Hall": 0,
+                "Sakurai Cafe": 1,
+                "Dormitory Commons": 2,
+            }[getLocalVariable("MirrorStart")];
+        }
 
         if (!greetingText || greetingSwipe === undefined) {
             console.error(`[WQR] Missing greeting.`);
